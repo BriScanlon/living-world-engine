@@ -81,6 +81,11 @@ inch. This is set per map in the **Map Scale** panel and saved with the map.
   4. On a square grid, start the line on a painted grid corner and the map also snaps so its squares
      sit on the table grid. Fine-tune with the ⅒-square arrows or the ±0.1% zoom buttons.
 
+To zoom by eye, scroll the **mouse wheel** over the Table Preview, use the on-screen **+ / −** buttons in
+its corner, or pinch with two fingers on a tablet. Hold **Shift** for fine steps. The wheel and pinch
+zoom around the cursor or fingers, and zooming always switches the map to true-scale mode, starting
+from its current size.
+
 The panel also takes the size directly as **squares across** (e.g. an Inkarnate export made 40
 squares wide) or **image px per square**, and has an *AI map preset* (140 ft wide). **✥ Pan** in the
 preview slides the map under the grid. Fog of war is anchored to the map image, so revealed areas

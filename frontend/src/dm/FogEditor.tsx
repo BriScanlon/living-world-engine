@@ -3,10 +3,10 @@ import { FogCanvas } from '../components/FogCanvas'
 import { GridCanvas } from '../components/GridCanvas'
 import { MapMedia } from '../components/MapMedia'
 import type { FogStore } from '../lib/fog'
-import { FEET_PER_SQUARE, mapRect, scaleRect, type Size } from '../lib/mapView'
+import { FEET_PER_SQUARE, effectivePxPerSquare, mapRect, scaleRect, zoomAt, type Size } from '../lib/mapView'
 import type { useTableSync } from '../lib/sync'
 import { useDevicePixelRatio, useElementSize } from '../lib/useElementSize'
-import type { FogMode, FogOp, TableState } from '../lib/types'
+import type { FogMode, FogOp, MapView, TableState } from '../lib/types'
 import { Button, Panel, Segmented, Slider, Toggle } from './ui'
 
 interface Props {
@@ -51,13 +51,64 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
   const [poly, setPoly] = useState<Pt[]>([])
   const [line, setLine] = useState<{ a: Pt; b: Pt } | null>(null)
   const [measured, setMeasured] = useState<{ imagePx: number; feet: string } | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   const strokes = useRef<number[]>([])
   const current = useRef<{ count: number; last: Pt } | null>(null)
   const expectingFull = useRef(false)
-  const drag = useRef<{ kind: 'measure' | 'pan'; startPx: Pt; cx: number; cy: number } | null>(null)
-  const panFrame = useRef<number>(0)
-  const pendingPan = useRef<{ cx: number; cy: number } | null>(null)
+  const drag = useRef<{ kind: 'measure' | 'pan'; startPx: Pt; cx: number; cy: number; right?: boolean; moved?: boolean } | null>(null)
+  const viewFrame = useRef<number>(0)
+  const pendingView = useRef<Partial<MapView> | null>(null)
+  // two-finger pinch on a tablet
+  const pointers = useRef(new Map<number, Pt>())
+  const pinch = useRef<{ d0: number; mid0: Pt; base: MapView } | null>(null)
+  // latest values for the native wheel listener (and to chain fast wheel ticks)
+  const live = useRef({ view, natural, tv, hexPx, vs })
+  live.current = { view, natural, tv, hexPx, vs }
+
+  const queueView = useCallback(
+    (v: Partial<MapView>) => {
+      pendingView.current = { ...pendingView.current, ...v }
+      if (!viewFrame.current)
+        viewFrame.current = window.setTimeout(() => {
+          viewFrame.current = 0
+          if (pendingView.current) patch('view', pendingView.current)
+          pendingView.current = null
+        }, 16)
+    },
+    [patch],
+  )
+
+  /** Zoom by `factor` around a point in table px (default: table centre). */
+  const zoomBy = useCallback(
+    (factor: number, anchor?: Pt) => {
+      const L = live.current
+      if (!L.natural) return
+      const next = zoomAt(L.view, L.natural, L.tv, L.hexPx, factor, anchor ?? [L.tv.w / 2, L.tv.h / 2])
+      L.view = next // chain wheel ticks that arrive before React re-renders
+      queueView(next)
+    },
+    [queueView],
+  )
+
+  // Mouse wheel over the preview zooms the map under the cursor (Shift = fine).
+  useEffect(() => {
+    const el = overlayRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      const L = live.current
+      if (!L.natural) return
+      e.preventDefault()
+      const r = el.getBoundingClientRect()
+      // Shift+wheel arrives as deltaX in some browsers
+      let delta = e.deltaY || e.deltaX
+      if (e.deltaMode === 1) delta *= 33 // lines -> px
+      const k = e.shiftKey ? 0.0003 : 0.0015
+      zoomBy(Math.exp(-delta * k), [(e.clientX - r.left) / L.vs, (e.clientY - r.top) / L.vs])
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [zoomBy])
 
   // Brush radius, normalised to the map width (fog op units).
   const rNorm = ((brushIn / 2) * hexPx) / Math.max(1, rectT.width)
@@ -82,6 +133,7 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
   }
   const toMap = ([px, py]: Pt): Pt => [(px - rectP.left) / rectP.width, (py - rectP.top) / rectP.height]
   const toPreview = ([mx, my]: Pt): Pt => [rectP.left + mx * rectP.width, rectP.top + my * rectP.height]
+  const midTable = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2 / vs, (a[1] + b[1]) / 2 / vs]
   const imagePxBetween = (a: Pt, b: Pt) =>
     natural ? Math.hypot((b[0] - a[0]) * natural.w, (b[1] - a[1]) * natural.h) : 0
 
@@ -105,14 +157,43 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
   }, [mode, sendFogOp, ensureEnabled])
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button === 2) {
-      setPoly([])
-      setLine(null)
-      return
-    }
     const pp = previewPt(e)
     const [x, y] = toMap(pp)
-    const capture = () => (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const target = e.currentTarget as HTMLElement
+    const capture = () => {
+      try {
+        target.setPointerCapture(e.pointerId)
+      } catch {
+        /* pointer already gone; the gesture still works without capture */
+      }
+    }
+    if (e.button === 2) {
+      // Right button held = drag the map around (any tool). A plain right-click cancels.
+      capture()
+      drag.current = { kind: 'pan', startPx: pp, cx: view.cx, cy: view.cy, right: true, moved: false }
+      setDragging(true)
+      return
+    }
+    if (e.button === 1) return
+    pointers.current.set(e.pointerId, pp)
+    if (pointers.current.size === 2 && natural) {
+      // Second finger: abandon the one-finger action and start pinch-zooming.
+      const partial = current.current?.count ?? 0
+      if (partial > 0) {
+        expectingFull.current = true
+        send({ type: 'fog_undo', count: partial })
+      }
+      if (tool === 'poly') setPoly((p) => p.slice(0, -1))
+      current.current = null
+      drag.current = null
+      setLine(null)
+      setMeasured(null)
+      capture()
+      const [a, b] = [...pointers.current.values()]
+      pinch.current = { d0: Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1])), mid0: midTable(a, b), base: view }
+      return
+    }
+    if (pointers.current.size > 1 || pinch.current) return
     if (tool === 'poly') {
       if (poly.length >= 3) {
         const [fx, fy] = toPreview(poly[0])
@@ -128,6 +209,7 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
     } else if (tool === 'pan') {
       capture()
       drag.current = { kind: 'pan', startPx: pp, cx: view.cx, cy: view.cy }
+      setDragging(true)
     } else {
       ensureEnabled()
       capture()
@@ -140,21 +222,27 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
     const pp = previewPt(e)
     const [x, y] = toMap(pp)
     setCursor([x, y])
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, pp)
+    const pz = pinch.current
+    if (pz) {
+      if (pointers.current.size >= 2 && natural) {
+        const [a, b] = [...pointers.current.values()]
+        const f = Math.hypot(a[0] - b[0], a[1] - b[1]) / pz.d0
+        queueView(zoomAt(pz.base, natural, tv, hexPx, f, pz.mid0, midTable(a, b)))
+      }
+      return
+    }
     const d = drag.current
     if (d?.kind === 'measure') {
       setLine((l) => (l ? { a: l.a, b: [x, y] } : l))
       return
     }
     if (d?.kind === 'pan') {
+      if (Math.hypot(pp[0] - d.startPx[0], pp[1] - d.startPx[1]) > 3) d.moved = true
       // preview px -> table px -> fraction of the map
       const dx = (pp[0] - d.startPx[0]) / vs / Math.max(1, rectT.width)
       const dy = (pp[1] - d.startPx[1]) / vs / Math.max(1, rectT.height)
-      pendingPan.current = { cx: d.cx - dx, cy: d.cy - dy }
-      if (!panFrame.current)
-        panFrame.current = requestAnimationFrame(() => {
-          panFrame.current = 0
-          if (pendingPan.current) patch('view', pendingPan.current)
-        })
+      queueView({ cx: d.cx - dx, cy: d.cy - dy })
       return
     }
     const cur = current.current
@@ -168,9 +256,24 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
     for (let i = 1; i <= steps; i++) stamp(lx + ((x - lx) * i) / steps, ly + ((y - ly) * i) / steps)
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId)
+    if (pinch.current) {
+      // the remaining finger does nothing until it lifts too
+      if (pointers.current.size < 2) pinch.current = null
+      return
+    }
     const d = drag.current
     drag.current = null
+    if (d?.kind === 'pan') setDragging(false)
+    if (d?.right) {
+      if (!d.moved) {
+        setPoly([])
+        setLine(null)
+        setMeasured(null)
+      }
+      return
+    }
     if (d?.kind === 'measure' && line) {
       const imagePx = imagePxBetween(line.a, line.b)
       if (imagePx < 4) {
@@ -244,7 +347,7 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
     const color = mode === 'reveal' ? '#fbbf24' : '#60a5fa'
     ctx.strokeStyle = color
     ctx.lineWidth = 1.5
-    if (tool === 'brush' && cursor) {
+    if (tool === 'brush' && cursor && !dragging) {
       const [px, py] = toPreview(cursor)
       ctx.beginPath()
       ctx.arc(px, py, rNorm * rectP.width, 0, Math.PI * 2)
@@ -302,12 +405,12 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
       ctx.fillText(label, lx, ly)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, poly, line, tool, mode, rNorm, width, height, dpr, rectP.left, rectP.top, rectP.width, rectP.height, view.pxPerSquare])
+  }, [cursor, dragging, poly, line, tool, mode, rNorm, width, height, dpr, rectP.left, rectP.top, rectP.width, rectP.height, view.pxPerSquare])
 
-  const cursorStyle = tool === 'pan' ? (drag.current ? 'grabbing' : 'grab') : tool === 'brush' ? 'none' : 'crosshair'
+  const cursorStyle = dragging ? 'grabbing' : tool === 'pan' ? 'grab' : tool === 'brush' ? 'none' : 'crosshair'
   const hints: Record<Tool, string> = {
     brush: 'Drag to paint fog · Ctrl+Z undoes the last stroke',
-    poly: 'Click to add points · click the first point, double-click or Enter to close · Esc / right-click cancels',
+    poly: 'Click to add points · click the first point, double-click or Enter to close · Esc / right-click (no drag) cancels',
     measure:
       'Drag across a known distance (e.g. 10 painted squares), then enter its length in feet · on a square grid, start on a painted corner and the map snaps into alignment',
     pan: 'Drag to slide the map under the grid · fog moves with the map',
@@ -418,6 +521,24 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
           onDoubleClick={() => tool === 'poly' && finishPoly()}
           onContextMenu={(e) => e.preventDefault()}
         />
+        {state.map && natural && (
+          <div className="absolute top-2 right-2 flex flex-col items-stretch gap-1 rounded-lg bg-black/75 p-1 shadow-lg ring-1 ring-white/15">
+            <ZoomButton label="+" title="Zoom map in (Shift = fine)" onClick={(fine) => zoomBy(fine ? 1.01 : 1.1)} />
+            <ZoomButton label="−" title="Zoom map out (Shift = fine)" onClick={(fine) => zoomBy(fine ? 1 / 1.01 : 1 / 1.1)} />
+            <ZoomButton label="⊙" title="Centre map" onClick={() => patch('view', { cx: 0.5, cy: 0.5 })} />
+            <div className="px-0.5 pt-0.5 text-center font-mono text-[10px] leading-tight text-slate-300" title="Image pixels per 5 ft square">
+              {view.mode === 'scale' ? (
+                <>
+                  {effectivePxPerSquare(view, natural, tv, hexPx).toFixed(1)}
+                  <br />
+                  px/sq
+                </>
+              ) : (
+                <span className="text-amber-300">{view.mode === 'cover' ? 'fill' : 'fit'}</span>
+              )}
+            </div>
+          </div>
+        )}
         {!fogMeta.enabled && (tool === 'brush' || tool === 'poly') && (
           <div className="pointer-events-none absolute top-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-slate-300">
             Fog of war is off — painting turns it on
@@ -438,9 +559,22 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
           <Toggle label="Show grid in preview" checked={showGrid} onChange={setShowGrid} />
         </div>
         <p className="text-xs text-slate-500">
-          {hints[tool]} · {fogMeta.count} fog ops
+          {hints[tool]} · wheel / pinch / + − zoom the map (Shift = fine) · hold right button to move it · {fogMeta.count} fog ops
         </p>
       </div>
     </Panel>
+  )
+}
+
+function ZoomButton({ label, title, onClick }: { label: string; title: string; onClick: (fine: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(e) => onClick(e.shiftKey)}
+      className="flex h-9 w-9 items-center justify-center rounded-md bg-white/10 text-lg font-semibold text-white hover:bg-amber-500 hover:text-slate-950 active:scale-95"
+    >
+      {label}
+    </button>
   )
 }

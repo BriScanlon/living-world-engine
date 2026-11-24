@@ -43,6 +43,43 @@ export function mapRect(view: MapView, natural: Size | null, viewport: Size, hex
   }
 }
 
+/** Image px per 5 ft square the map is *currently displayed* at (works for fill/fit too). */
+export function effectivePxPerSquare(view: MapView, natural: Size, viewport: Size, hexPx: number) {
+  return (hexPx * natural.w) / mapRect(view, natural, viewport, hexPx).width
+}
+
+/**
+ * Zoom by `factor` (>1 = map bigger) keeping the map point under `anchorFrom` (table px)
+ * under `anchorTo` (defaults to the same spot), so wheel/pinch zoom feels "under the finger".
+ * Always returns a true-scale view, starting from whatever size the map is shown at now.
+ */
+export function zoomAt(
+  base: MapView,
+  natural: Size,
+  viewport: Size,
+  hexPx: number,
+  factor: number,
+  anchorFrom: [number, number],
+  anchorTo: [number, number] = anchorFrom,
+): MapView {
+  const r = mapRect(base, natural, viewport, hexPx)
+  const px = (hexPx * natural.w) / r.width
+  const pxNew = Math.min(20000, Math.max(1, px / factor))
+  const k = px / pxNew
+  const w = r.width * k
+  const h = r.height * k
+  const mx = (anchorFrom[0] - r.left) / r.width
+  const my = (anchorFrom[1] - r.top) / r.height
+  const left = anchorTo[0] - mx * w
+  const top = anchorTo[1] - my * h
+  return {
+    mode: 'scale',
+    pxPerSquare: Math.round(pxNew * 1000) / 1000,
+    cx: (viewport.w / 2 - left) / w,
+    cy: (viewport.h / 2 - top) / h,
+  }
+}
+
 export function scaleRect(r: Rect, k: number): Rect {
   return { left: r.left * k, top: r.top * k, width: r.width * k, height: r.height * k }
 }
