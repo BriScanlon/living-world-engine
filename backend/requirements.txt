@@ -1,0 +1,13 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+terminusdb-client>=10.2.6
+langgraph>=0.2
+openai>=1.40
+httpx>=0.27
+python-frontmatter>=1.1
+rapidfuzz>=3.9
+python-multipart>=0.0.9
+pypdf>=4.2
+python-docx>=1.1

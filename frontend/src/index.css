@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-ink-950: #0d0f12;
+  --color-ink-900: #14171c;
+  --color-ink-850: #191d23;
+  --color-ink-800: #1f242b;
+  --color-ink-700: #2b313a;
+  --color-ink-600: #3a414c;
+  --color-ink-400: #7d8796;
+  --color-ink-300: #a3acb9;
+  --color-ink-200: #c9d0da;
+  --color-ink-100: #e6eaf0;
+  --color-ember-300: #f5c77e;
+  --color-ember-400: #f0ad4e;
+  --color-ember-500: #e08a1e;
+  --color-ember-600: #b86d12;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-ember-400) 40%, transparent);
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 4px;
+}

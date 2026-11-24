@@ -1,0 +1,58 @@
+name: living-world-engine
+
+services:
+  terminusdb:
+    image: terminusdb/terminusdb-server:v11.1.14
+    environment:
+      TERMINUSDB_ADMIN_PASS: ${TERMINUSDB_ADMIN_PASS:-root}
+      TERMINUSDB_SERVER_PORT: 6363
+    ports:
+      - "${TERMINUSDB_PORT:-6363}:6363"
+    volumes:
+      - terminusdb_data:/app/terminusdb/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6363 && printf 'GET /api/ok HTTP/1.0\r\n\r\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-false}
+        INSTALL_WHISPER: ${INSTALL_WHISPER:-false}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TERMINUSDB_URL: http://terminusdb:6363/
+      TERMINUSDB_PASS: ${TERMINUSDB_ADMIN_PASS:-root}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      terminusdb:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  terminusdb_data:

@@ -1,0 +1,251 @@
+# 🕯️ Living World Engine
+
+An open-source (MIT) **living world engine for tabletop RPGs**. It ingests your campaign lore into a
+version-controlled, **bi-temporal knowledge graph** (TerminusDB), forks the world at the end of each
+session, lets NPCs and factions act on their own desires, needs, fears and *beliefs* in a
+**LangGraph multi-agent simulation**, and hands the DM a 4-part forecast briefing with full
+branching, diffing, cherry-picking, merging and time-travel.
+
+```
+ Session notes ──► fork main ──► apply party actions ──► ┌─ activation radius (2 hops + goal clocks) ─┐
+                     (branch)       (events, trust,       │  agent turns (BDI, KNOWS-only context)     │ × rounds
+                                     knowledge)           │  world arbiter (resolve clashes → events)  │
+                                                          └─ rumors (public/leaked → taverns)  ────────┘
+                                                                          │
+              DM Briefing ◄── diff main vs forecast/session-N ◄── finalize report
+     merge to canon · cherry-pick events · discard & re-run · time-travel any branch/day/commit
+```
+
+Everything runs on a laptop with **`MOCK_LLM=true`** (deterministic, rule-based BDI agents — no GPU),
+or against any **OpenAI-compatible** endpoint (Ollama, vLLM, LM Studio, OpenAI…) on your LAN.
+
+---
+
+## Quick start
+
+Requirements: Docker with Compose v2.
+
+```bash
+cp .env.example .env          # defaults: MOCK_LLM=true, demo world seeded on first start
+docker compose up --build
+```
+
+| What | URL |
+|---|---|
+| DM dashboard | http://localhost:5173 |
+| Backend API (OpenAPI docs) | http://localhost:8000/docs |
+| TerminusDB dashboard (admin / `root`) | http://localhost:6363 |
+
+On first start the backend creates the `living_world` database, applies the schema and seeds
+**Greywater**, a small harbour town (see [Demo world](#demo-world)). Then:
+
+1. **Session Forecaster** → *Use demo summary* → **Run Forecast**. Watch each LangGraph node run live.
+2. **Open DM Briefing** → read the four sections; tick events to **Cherry-Pick**, or **Merge to Canon**.
+3. **Time Travel** → pick a branch, drag the in-world day slider, or pick a historic commit.
+4. **Ingest** → drop Obsidian notes / PDFs / Word docs (try the files in `sample_data/`).
+
+Ports already in use? Override `FRONTEND_PORT`, `BACKEND_PORT`, `TERMINUSDB_PORT` in `.env`.
+
+Re-seed from scratch (deletes all branches):
+
+```bash
+docker compose exec backend python /app/scripts/seed_demo_world.py --reset
+```
+
+### Using a real LLM
+
+```ini
+# .env
+MOCK_LLM=false
+LLM_BASE_URL=http://host.docker.internal:11434/v1   # Ollama on the Docker host (or http://<lan-ip>:11434/v1)
+LLM_API_KEY=ollama
+LLM_MODEL=llama3.1:8b                               # anything that follows JSON instructions well
+LLM_JSON_MODE=json_object                           # json_schema for vLLM/OpenAI strict schemas; none to disable
+```
+
+`docker compose up -d --build backend` to apply. Every LLM call returns a validated Pydantic object;
+invalid JSON is re-prompted with the validation error (`LLM_MAX_RETRIES`). Agent turns run in
+parallel (`LLM_CONCURRENCY`).
+
+### Optional heavy ingestion extras
+
+| Feature | Enable | Without it |
+|---|---|---|
+| `docling` (high-fidelity PDF/DOCX/PPTX → Markdown) | `INSTALL_DOCLING=true` | PDF via `pypdf`, DOCX via `python-docx` |
+| `faster-whisper` (local audio transcription) | `INSTALL_WHISPER=true`, `WHISPER_MODEL=base` | audio uploads are rejected |
+
+These are build args (docling pulls in PyTorch, ~2 GB): set them in `.env`, then `docker compose build backend`.
+
+---
+
+## How it works
+
+### 1. Bi-temporal, motivational graph (`backend/graph/schema.py`)
+
+Two independent time axes:
+
+* **Transaction time** — TerminusDB commits. Every write (seed, ingest, each simulation step, merge,
+  cherry-pick) is a commit on a branch, so you can diff, branch, merge and read the DB *as it was
+  recorded* at any commit.
+* **Valid (in-world) time** — every node and edge has `in_world_start` / `in_world_end` (campaign
+  day integers) plus `source_session`. Facts are **never deleted**: when Vane's trust in the party
+  drops, the old `RelationshipEdge` gets `in_world_end` + `ended_by_event` and a new edge starts.
+  A snapshot at day *D* keeps docs with `start ≤ D < end`.
+
+| Kind | Types |
+|---|---|
+| Nodes | `Character`, `Faction`, `Location`, `Item`, `Monster`, `Event`, `Rumor`, `Goal` (all inherit `Entity`) |
+| `DesireEdge` | `from_id` → `target_id` / `target_text`, `kind` WANTS·NEEDS·FEARS, `priority` 0–1 |
+| `ControlEdge` | `from_id` → `target_id`, `kind` CONTROLS·OWNS |
+| `RelationshipEdge` | `from_id` → `to_id`, `trust_score` −100…+100, `label` (ally, rival, debt…) |
+| `EpistemicEdge` | `agent_id` → `fact_or_event_id`, `kind` KNOWS·BELIEVES, `confidence` 0–1 |
+| Meta | `Alias` (entity-resolution table), `ForecastRun` (inputs + report of each forecast) |
+
+Edges carry `source_event` / `ended_by_event` provenance links, which is what makes cherry-picking an
+event *together with its consequences* possible. `Goal`s are progress clocks
+(`clock_progress/clock_segments`, ticking every `ticks_every_days`).
+
+**Epistemic rule.** An agent's prompt is built by `WorldView.agent_context()` and contains only:
+itself, its desires, goals, holdings, relationships, and nodes it is linked to via `KNOWS`/`BELIEVES`
+(own or its faction's). Intents that target anything else are downgraded to `observe` and reported as
+*epistemic violations* in the briefing. Secret acts are only *suspected* (`BELIEVES 0.5`) by victims
+until they investigate; rumors spread `BELIEVES` edges to locals.
+
+### 2. Ingestion (`backend/ingestion/`)
+
+| Input | Path |
+|---|---|
+| Obsidian / Markdown | YAML frontmatter → node properties (`type`, `aliases`, `faction`, `location`, `wants`, `needs`, `fears`, `controls`, `owns`, `allies`, `rivals`, `enemies`, `knows`…); `[[Wikilinks]]` → baseline edges (an agent's note linking `[[X]]` ⇒ it KNOWS X; unknown links become stub nodes) |
+| PDF / Word / HTML | `docling` → Markdown (fallback `pypdf` / `python-docx`), chunked by heading |
+| Session notes / audio | text, or `faster-whisper` transcript; facts stamped with the in-world day |
+| Extraction | LLM → `{nodes, edges}` (incl. inferred WANTS/NEEDS and KNOWS). Mock mode uses pattern heuristics ("X fears Y", "X owes Y"…) |
+| Entity resolution | alias table + honorific stripping + `rapidfuzz` — "The Baron", "Lord Vane", "Baron Vane" → `Character/lord-aldric-vane`; new surface forms are saved as `Alias` docs |
+
+Each file is one commit. Ingest into a scratch branch (e.g. `ingest-session-15`), review it in
+Branches / Time Travel, then merge.
+
+### 3. Simulation (`backend/simulation/engine.py`)
+
+A compiled LangGraph `StateGraph`:
+
+1. **`fork_canon`** — branch `main` → `forecast/session-{N}-{timestamp}` (records the fork commit).
+2. **`apply_session_delta`** — the summary becomes party-action `Event`s, item transfers, deaths,
+   trust shifts and `KNOWS`/`BELIEVES` for participants, victims and witnesses.
+3. **`select_active_agents`** — wakes Characters/Factions within **2 hops** (`ACTIVATION_HOPS`) of
+   affected nodes (via relationship/control/desire/membership/location links), plus any agent whose
+   high-priority goal clock ticks during the round.
+4. **`run_agent_turns`** — BDI: each agent sees only its epistemic context and returns an
+   `AgentIntent {action, target_id, resources_spent, reasoning, public_or_secret}`.
+5. **`world_arbiter`** — resolves simultaneous intents (contests by resources/influence,
+   relationships), emits `WorldEvent`s with relationship shifts, control changes, goal progress,
+   new goals/fears, deaths, and knowledge gained; completed goal clocks fire consequences.
+6. **`propagate_rumors`** — public/leaked events become `Rumor`s in taverns/settlements with
+   `accuracy` (True / Exaggerated / False) and a ready-to-read line of dialogue.
+
+Steps 3–6 loop once per round (`ROUND_LENGTH_DAYS`, max `MAX_ROUNDS`) across the forecast window,
+so round-1 events become round-2 knowledge and motives: genuine ripples. Each step commits to the
+forecast branch, so the branch log is an audit trail of the simulation.
+
+### 4. DM dashboard (`frontend/`)
+
+* **Session Forecaster** — session #, start/end day, days until next session, summary (paste,
+  upload, or transcribe audio); live per-node progress via server-sent events.
+* **DM Briefing** (`main` vs forecast diff):
+  1. *Direct Ripple Effects* — Party action → affected nodes → NPC reaction trees, with reasoning.
+  2. *Off-Screen Events* — chronological log; tick to cherry-pick.
+  3. *Relationship & Motivation Shifts* — trust before → after (with causes), goal clocks, new
+     WANTS/NEEDS/FEARS, control changes, treasury, casualties, what each agent learned.
+  4. *Tavern Rumors & Hooks* — filter by location and accuracy; copy dialogue.
+  Plus agent intents/activation trace and the raw TerminusDB JSON patch.
+* **Branch controls** — Merge to Canon, Cherry-Pick, Discard & Re-run (fresh seed), Discard.
+* **Time Travel** — any branch × any in-world day × any commit; force-directed graph,
+  click an agent to see exactly what its prompt would contain.
+
+**Merging.** If `main` hasn't moved since the fork, merge is a fast-forward rebase. Otherwise the
+fork-point→forecast patch is applied with TerminusDB's `apply`; if that conflicts (e.g. you
+cherry-picked some events first), it falls back to a document-level 3-way merge in one commit,
+with the forecast winning on documents it changed.
+
+---
+
+## API
+
+Interactive docs at `/docs`. Highlights:
+
+| Method | Path | |
+|---|---|---|
+| GET | `/api/health` | TerminusDB status, mock mode, optional extras |
+| POST | `/api/forecasts` | `{session_number, start_day, end_day, forecast_days, session_summary, base_branch}` → `{run_id, branch}` |
+| GET | `/api/forecasts/{id}/events` | SSE stream of LangGraph progress |
+| GET | `/api/diff?base=main&compare=…` | the 4-part briefing |
+| GET | `/api/diff/raw?base=…&compare=…` | TerminusDB native diff |
+| POST | `/api/branches/{name}/merge` · `/cherry-pick` · `/rerun` | branch controls |
+| DELETE | `/api/branches/{name}` | discard |
+| GET | `/api/branches/{name}/log` | commit history |
+| GET | `/api/world/snapshot?branch=&day=&commit=` | time travel |
+| GET | `/api/world/agent/{id}?branch=&day=` | an agent's epistemic context |
+| POST | `/api/ingest/files` · `/ingest/text` · `/ingest/audio` · `/ingest/transcribe` | ingestion |
+| POST | `/api/admin/seed?reset=true` | reset to the demo world |
+
+---
+
+## Demo world
+
+Greywater, end of session 13, day 10. **House Vane** (Lord Aldric Vane, Captain Hollis Brand) —
+broke, wants the docks, fears the Sunken Ledger surfacing — vs **the Ashen Guild** (Sela Marrow) —
+holds the docks, wants the ledger as blackmail. Wenna Tull keeps the Drowned Lantern neutral;
+Brother Callum wants the Baron exposed; Brand is secretly in debt to the Guild. Four locations plus
+the tavern, two items, a marsh hag, three goal clocks, rumors already circulating, and the party
+(**the Lantern Company**). `sample_data/` has Obsidian notes and session notes to ingest on top.
+
+---
+
+## Development without Docker
+
+```bash
+# TerminusDB
+docker run -d -p 6363:6363 -e TERMINUSDB_ADMIN_PASS=root terminusdb/terminusdb-server:v11.1.14
+
+# Backend (Python 3.11+)
+python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r backend/requirements.txt pytest
+python scripts/seed_demo_world.py --reset
+cd backend && uvicorn main:app --reload --port 8000
+
+# Frontend
+cd frontend && npm install && npm run dev            # http://localhost:5173 (proxies /api → :8000; override with VITE_API_PROXY)
+
+# Tests (unit + integration against a throwaway TerminusDB database)
+cd backend && pytest
+```
+
+Layout:
+
+```
+backend/
+  graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
+                builders.py · briefing.py (4-part diff) · seed.py
+  simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py · runs.py
+  ingestion/    markdown.py · documents.py · audio.py · extract.py · resolution.py · pipeline.py
+  llm/          client.py (OpenAI-compatible, validated JSON) · mock.py (deterministic BDI)
+  api/routes.py · main.py · config.py · tests/
+frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Branches,TimeTravel,Ingest}.tsx
+scripts/seed_demo_world.py
+```
+
+## Notes & limitations
+
+* TerminusDB branch ids can't contain `/`, so `forecast/session-14-…` is stored as
+  `forecast--session-14-…`; the API and UI accept and show the slash form.
+* Worlds are loaded into memory per operation (fine for hundreds–low thousands of docs). The
+  `GraphStore`/`WorldView` split keeps a move to WOQL queries local if your campaign outgrows that.
+* In-world time is an integer campaign day. Character location and faction treasury are updated in
+  place (history kept by commits, not by valid time).
+* The forecast run registry (live progress) is in-memory; finished forecasts persist as
+  `ForecastRun` docs on their branch, so briefings survive restarts.
+* Mock mode is a deterministic rule-based model, not an LLM: great for testing the pipeline and UI,
+  less inventive than a real model.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
