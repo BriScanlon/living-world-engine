@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { useTableSync } from '../lib/sync'
 import type { AppConfig } from '../lib/types'
@@ -9,6 +9,9 @@ import { Jobs } from './Jobs'
 import { Library } from './Library'
 import { useNaturalSize } from '../lib/mapView'
 import { CalibrationControls, DisplayControls, FxControls, GridControls, MapScaleControls } from './TableControls'
+import { ArrangeProvider, ZoneView } from './Arrange'
+import { DEFAULT_LAYOUT, loadLayout, normalize, sameLayout, saveLayout, type Layout, type PanelId } from './layout'
+import { Button } from './ui'
 
 /** /dm — the Dungeon Master's control panel (laptop / tablet). */
 export function DmPage() {
@@ -16,6 +19,29 @@ export function DmPage() {
   const [natural, onNatural] = useNaturalSize(sync.state?.map ?? null)
   const { state, connected, toasts, toast } = sync
   const [config, setConfig] = useState<AppConfig | null>(null)
+  // Panel layout: `saved` is what's in use; `draft` exists only while in layout edit mode.
+  const [saved, setSaved] = useState<Layout>(loadLayout)
+  const [draft, setDraft] = useState<Layout | null>(null)
+  const editing = draft !== null
+  const layout = draft ?? saved
+
+  const startEditing = () => setDraft(saved)
+  const cancelEditing = () => setDraft(null)
+  const saveEditing = () => {
+    if (draft) {
+      saveLayout(draft)
+      setSaved(draft)
+    }
+    setDraft(null)
+    toast('Layout saved', 'success')
+  }
+
+  useEffect(() => {
+    if (!editing) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setDraft(null)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editing])
 
   useEffect(() => {
     api.config().then(setConfig).catch(() => undefined)
@@ -24,6 +50,43 @@ export function DmPage() {
   useEffect(() => {
     document.title = 'DM · Local-AI VTT'
   }, [])
+
+  const renderPanel = (id: PanelId): ReactNode => {
+    if (!state) return null
+    switch (id) {
+      case 'preview':
+        return (
+          <FogEditor
+            state={state}
+            fog={sync.fog}
+            fogMeta={sync.fogMeta}
+            sendFogOp={sync.sendFogOp}
+            send={sync.send}
+            patch={sync.patch}
+            natural={natural}
+            onNatural={onNatural}
+          />
+        )
+      case 'mapScale':
+        return <MapScaleControls state={state} patch={sync.patch} natural={natural} />
+      case 'grid':
+        return <GridControls state={state} patch={sync.patch} />
+      case 'calibration':
+        return <CalibrationControls state={state} send={sync.send} defaultHexPx={config?.defaultHexPx ?? 91.8} />
+      case 'fx':
+        return <FxControls state={state} patch={sync.patch} />
+      case 'display':
+        return <DisplayControls state={state} patch={sync.patch} />
+      case 'library':
+        return <Library version={sync.libraryVersion} currentMapId={state.map?.id ?? null} toast={toast} />
+      case 'generator':
+        return <Generator config={config} toast={toast} />
+      case 'jobs':
+        return <Jobs jobs={sync.jobs} />
+      case 'importer':
+        return <Importer toast={toast} watchInbox={config?.watchInbox ?? true} />
+    }
+  }
 
   return (
     <div className="min-h-full bg-[#0b0d12] text-slate-200">
@@ -45,45 +108,49 @@ export function DmPage() {
             MOCK_AI_PIPELINE
           </span>
         )}
-        <a href="/table" target="_blank" rel="noreferrer" className="ml-auto text-sm text-amber-300 hover:text-amber-200">
-          Open /table ↗
-        </a>
+        <div className="ml-auto flex items-center gap-3">
+          {!editing && state && (
+            <Button variant="subtle" onClick={startEditing} title="Rearrange and move the DM panels">
+              ⊞ Edit layout
+            </Button>
+          )}
+          <a href="/table" target="_blank" rel="noreferrer" className="text-sm text-amber-300 hover:text-amber-200">
+            Open /table ↗
+          </a>
+        </div>
       </header>
+
+      {editing && draft && (
+        <div className="sticky top-[49px] z-20 flex flex-wrap items-center gap-3 border-b border-amber-400/30 bg-amber-950/90 px-4 py-2 backdrop-blur">
+          <span className="text-sm font-semibold text-amber-200">Layout edit mode</span>
+          <span className="text-xs text-amber-200/70">
+            Drag panels to reorder or move them between the main area and the sidebar, or use the arrows. Esc cancels.
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button
+              variant="subtle"
+              disabled={sameLayout(draft, normalize(DEFAULT_LAYOUT))}
+              onClick={() => setDraft(normalize(DEFAULT_LAYOUT))}
+            >
+              Reset to default
+            </Button>
+            <Button onClick={cancelEditing}>Cancel</Button>
+            <Button variant="primary" onClick={saveEditing} disabled={sameLayout(draft, saved)}>
+              Save layout
+            </Button>
+          </div>
+        </div>
+      )}
 
       {!state ? (
         <div className="flex h-[60vh] items-center justify-center text-slate-500">Connecting to VTT server…</div>
       ) : (
-        <main className="mx-auto grid max-w-[1800px] gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_400px]">
-          <div className="min-w-0 space-y-4">
-            <FogEditor
-              state={state}
-              fog={sync.fog}
-              fogMeta={sync.fogMeta}
-              sendFogOp={sync.sendFogOp}
-              send={sync.send}
-              patch={sync.patch}
-              natural={natural}
-              onNatural={onNatural}
-            />
-            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              <MapScaleControls state={state} patch={sync.patch} natural={natural} />
-              <GridControls state={state} patch={sync.patch} />
-              <CalibrationControls state={state} send={sync.send} defaultHexPx={config?.defaultHexPx ?? 91.8} />
-              <div className="space-y-4">
-                <FxControls state={state} patch={sync.patch} />
-                <DisplayControls state={state} patch={sync.patch} />
-              </div>
-            </div>
-          </div>
-          <aside className="space-y-4">
-            <Generator config={config} toast={toast} />
-            <Jobs jobs={sync.jobs} />
-            <Importer toast={toast} watchInbox={config?.watchInbox ?? true} />
-          </aside>
-          <div className="xl:col-span-2">
-            <Library version={sync.libraryVersion} currentMapId={state.map?.id ?? null} toast={toast} />
-          </div>
-        </main>
+        <ArrangeProvider value={{ editing, layout, setLayout: setDraft }}>
+          <main className="mx-auto grid max-w-[1800px] items-start gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_400px]">
+            <ZoneView zone="main" className="grid min-w-0 items-start gap-4 md:grid-cols-2 2xl:grid-cols-3" render={renderPanel} />
+            <ZoneView zone="side" className="grid min-w-0 items-start gap-4" render={renderPanel} />
+          </main>
+        </ArrangeProvider>
       )}
 
       <div className="fixed right-4 bottom-4 z-50 flex w-80 flex-col gap-2">

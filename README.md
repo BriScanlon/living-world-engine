@@ -91,6 +91,18 @@ squares wide) or **image px per square**, and has an *AI map preset* (140 ft wid
 preview slides the map under the grid. Fog of war is anchored to the map image, so revealed areas
 move and scale with it.
 
+## Arranging the DM screen
+
+Click **⊞ Edit layout** in the `/dm` header to rearrange the panels. In edit mode each panel shows as
+a compact card that you can move in two ways:
+
+- **Drag** it to reorder, or onto the other column to move it between the main area and the sidebar.
+- Use the card's **↑ / ↓ / To sidebar → / ← To main area** buttons, which also work on a tablet.
+
+**Save layout** keeps the changes and **Cancel** (or **Esc**) discards them. **Reset to default**
+restores the original arrangement once you save. The layout is stored in that browser, so a laptop
+and a tablet can each keep their own.
+
 ---
 
 ## The AI pipeline
