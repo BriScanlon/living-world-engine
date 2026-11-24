@@ -1,0 +1,152 @@
+{
+  "_comment": [
+    "ComfyUI API-format workflow: Wan 2.1 FLF2V (first-last-frame to video) SEAMLESS LOOP.",
+    "The same still is fed as BOTH the first and the last frame, and the motion prompt demands a locked",
+    "camera, so frame N returns to frame 0. Node 16 then drops the duplicated final frame so the",
+    "<video loop> seam is invisible.",
+    "Keys starting with '_' are documentation only; the VTT strips them before POST /prompt.",
+    "Node IDs:",
+    "  1  UNETLoader                 - Wan 2.1 FLF2V 14B 720p               (models/diffusion_models)",
+    "  2  CLIPLoader                 - umT5-XXL text encoder, type 'wan'    (models/text_encoders)",
+    "  3  VAELoader                  - Wan 2.1 VAE                          (models/vae)",
+    "  4  CLIPVisionLoader           - clip_vision_h                        (models/clip_vision)",
+    "  5  LoadImage                  - FIRST FRAME <- first_frame (uploaded by the VTT via /upload/image)",
+    "  6  LoadImage                  - LAST FRAME  <- last_frame  (same file as node 5)",
+    "  7  CLIPVisionEncode           - vision embedding of the first frame",
+    "  8  CLIPVisionEncode           - vision embedding of the last frame",
+    " 10  CLIPTextEncode             - POSITIVE <- motion_prompt (locked-camera prefix enforced by the VTT)",
+    " 11  CLIPTextEncode             - NEGATIVE: forbids camera motion, zoom, morphing, new objects",
+    " 12  WanFirstLastFrameToVideo   - size <- width/height (VTT keeps aspect, longest side 1280); 81 frames",
+    " 13  ModelSamplingSD3           - shift 8 (Wan default)",
+    " 14  KSampler                   - SEED <- seed",
+    " 15  VAEDecode",
+    " 16  ImageFromBatch             - keep frames 0..79 (drop frame 80 == frame 0) for a seamless loop",
+    " 17  SaveWEBM                   - VP9 WebM @16 fps  <- filename_prefix",
+    "Low VRAM? Use the fp8 diffusion model and fewer frames (length 49 -> keep 48 in node 16)."
+  ],
+  "_params": {
+    "first_frame":     { "node": "5",  "input": "image",           "comment": "uploaded still (first frame)" },
+    "last_frame":      { "node": "6",  "input": "image",           "comment": "same uploaded still (last frame)" },
+    "motion_prompt":   { "node": "10", "input": "text",            "comment": "LLM / vision-LLM motion prompt" },
+    "seed":            { "node": "14", "input": "seed",            "comment": "random per job" },
+    "width":           { "node": "12", "input": "width",           "comment": "video width (multiple of 16)" },
+    "height":          { "node": "12", "input": "height",          "comment": "video height (multiple of 16)" },
+    "filename_prefix": { "node": "17", "input": "filename_prefix", "comment": "output name inside ComfyUI/output" }
+  },
+
+  "1": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "[1] Load Wan 2.1 FLF2V 14B" },
+    "inputs": { "unet_name": "wan2.1_flf2v_720p_14B_fp16.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "[2] Load umT5-XXL" },
+    "inputs": { "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "[3] Load Wan VAE" },
+    "inputs": { "vae_name": "wan_2.1_vae.safetensors" }
+  },
+  "4": {
+    "class_type": "CLIPVisionLoader",
+    "_meta": { "title": "[4] Load CLIP Vision H" },
+    "inputs": { "clip_name": "clip_vision_h.safetensors" }
+  },
+  "5": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "[5] FIRST FRAME <- first_frame" },
+    "inputs": { "image": "example.png" }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "[6] LAST FRAME <- last_frame (same still)" },
+    "inputs": { "image": "example.png" }
+  },
+  "7": {
+    "class_type": "CLIPVisionEncode",
+    "_meta": { "title": "[7] Vision encode first" },
+    "inputs": { "clip_vision": ["4", 0], "image": ["5", 0], "crop": "none" }
+  },
+  "8": {
+    "class_type": "CLIPVisionEncode",
+    "_meta": { "title": "[8] Vision encode last" },
+    "inputs": { "clip_vision": ["4", 0], "image": ["6", 0], "crop": "none" }
+  },
+  "10": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "[10] POSITIVE <- motion_prompt" },
+    "inputs": {
+      "text": "Completely locked static camera, top-down view. Gentle ripples on the water, softly flickering torch flames, faint drifting mist. Seamless loop.",
+      "clip": ["2", 0]
+    }
+  },
+  "11": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "[11] NEGATIVE (camera motion etc.)" },
+    "inputs": {
+      "text": "camera movement, pan, zoom, dolly, tilt, rotation, camera shake, perspective change, parallax, morphing, warping, layout change, new objects, people, characters, creatures, text, watermark, flicker of whole frame, brightness pulsing, blurry, low quality",
+      "clip": ["2", 0]
+    }
+  },
+  "12": {
+    "class_type": "WanFirstLastFrameToVideo",
+    "_meta": { "title": "[12] FLF2V conditioning <- width/height" },
+    "inputs": {
+      "width": 1280,
+      "height": 720,
+      "length": 81,
+      "batch_size": 1,
+      "positive": ["10", 0],
+      "negative": ["11", 0],
+      "vae": ["3", 0],
+      "clip_vision_start_image": ["7", 0],
+      "clip_vision_end_image": ["8", 0],
+      "start_image": ["5", 0],
+      "end_image": ["6", 0]
+    }
+  },
+  "13": {
+    "class_type": "ModelSamplingSD3",
+    "_meta": { "title": "[13] Model sampling shift" },
+    "inputs": { "shift": 8.0, "model": ["1", 0] }
+  },
+  "14": {
+    "class_type": "KSampler",
+    "_meta": { "title": "[14] KSampler  SEED <- seed" },
+    "inputs": {
+      "seed": 42,
+      "steps": 20,
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": ["13", 0],
+      "positive": ["12", 0],
+      "negative": ["12", 1],
+      "latent_image": ["12", 2]
+    }
+  },
+  "15": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "[15] Decode frames" },
+    "inputs": { "samples": ["14", 0], "vae": ["3", 0] }
+  },
+  "16": {
+    "class_type": "ImageFromBatch",
+    "_meta": { "title": "[16] Drop duplicated last frame (seamless loop)" },
+    "inputs": { "image": ["15", 0], "batch_index": 0, "length": 80 }
+  },
+  "17": {
+    "class_type": "SaveWEBM",
+    "_meta": { "title": "[17] Save WebM <- filename_prefix" },
+    "inputs": {
+      "filename_prefix": "vtt/loop",
+      "codec": "vp9",
+      "fps": 16.0,
+      "crf": 24.0,
+      "images": ["16", 0]
+    }
+  }
+}
