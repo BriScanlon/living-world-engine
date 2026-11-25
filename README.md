@@ -41,8 +41,10 @@ On first start the backend creates the `living_world` database, applies the sche
 
 1. **Session Forecaster** → *Use demo summary* → **Run Forecast**. Watch each LangGraph node run live.
 2. **Open DM Briefing** → read the four sections; tick events to **Cherry-Pick**, or **Merge to Canon**.
-3. **Time Travel** → pick a branch, drag the in-world day slider, or pick a historic commit.
-4. **Ingest** → drop Obsidian notes / PDFs / Word docs (try the files in `sample_data/`).
+3. **World Atlas** → spin the globe; pick the forecast branch, tick *Compare with main* and press ▶
+   to watch provinces change hands day by day.
+4. **Time Travel** → pick a branch, drag the in-world day slider, or pick a historic commit.
+5. **Ingest** → drop Obsidian notes / PDFs / Word docs (try the files in `sample_data/`).
 
 Ports already in use? Override `FRONTEND_PORT`, `BACKEND_PORT`, `TERMINUSDB_PORT` in `.env`.
 
@@ -146,7 +148,29 @@ Steps 3–6 loop once per round (`ROUND_LENGTH_DAYS`, max `MAX_ROUNDS`) across t
 so round-1 events become round-2 knowledge and motives: genuine ripples. Each step commits to the
 forecast branch, so the branch log is an audit trail of the simulation.
 
-### 4. DM dashboard (`frontend/`)
+### 4. World Atlas (`backend/atlas/`, `frontend/src/views/Atlas.tsx`)
+
+A MapLibre GL **globe** of the campaign planet that shows the simulation for any branch and in-world day.
+
+* **World source:** [Azgaar's Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator) (MIT).
+  Export with *Save > Export > JSON > **Full***, then
+  `python scripts/import_azgaar.py MyWorld_Full.json [--branch import-1] [--place-greywater]`
+  or `POST /api/atlas/import`. Coordinates use Azgaar's own projection (`lonW + x/width·lonT`, `latN − y/height·latT`).
+* **What the import creates:** realms → `Faction`s (colour, treasury, influence from size), provinces → `Province`
+  + a bi-temporal `CONTROLS` edge, burgs → `Location`s with `lon`/`lat`, diplomacy → trust, plus border claims
+  (WANTS), war goals with clocks and knowledge of neighbours — so imported realms act in forecasts and **borders move**.
+* **Static layers** (land, biomes, provinces, rivers, roads, burgs) are dissolved from Azgaar's cells with Shapely and
+  written as GeoJSON; inside Docker **tippecanoe** packs them into one **PMTiles** file served with HTTP range requests.
+  Without tippecanoe the atlas loads the GeoJSON directly.
+* **Live layers** come from `GET /api/atlas?branch=&day=&compare=`: province controllers (applied with MapLibre
+  feature-state, so dragging the day slider recolours borders without re-tiling), places with who is there,
+  events of the last 30 days (ringed when new on the branch), and tavern rumors. `GET /api/atlas/place/{id}` gives
+  a place's holder, people, history and rumors.
+* **First run:** with `ATLAS_SAMPLE_ON_STARTUP=true` the backend generates a small sample planet *in Azgaar's Full JSON
+  format* (`backend/atlas/sample_world.py`; hex cells instead of Voronoi), imports it, and places Greywater on a port
+  town as a vassal of the local realm. Azgaar's repo only ships `.map` saves, which don't store cell polygons.
+
+### 5. DM dashboard (`frontend/`)
 
 * **Session Forecaster** — session #, start/end day, days until next session, summary (paste,
   upload, or transcribe audio); live per-node progress via server-sent events.
@@ -184,6 +208,9 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/branches/{name}/log` | commit history |
 | GET | `/api/world/snapshot?branch=&day=&commit=` | time travel |
 | GET | `/api/world/agent/{id}?branch=&day=` | an agent's epistemic context |
+| GET | `/api/atlas?branch=&day=&compare=` | live map state: territory, places, events, rumors |
+| GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |
+| POST | `/api/atlas/import` | import an Azgaar Full JSON export |
 | POST | `/api/ingest/files` · `/ingest/text` · `/ingest/audio` · `/ingest/transcribe` | ingestion |
 | POST | `/api/admin/seed?reset=true` | reset to the demo world |
 
@@ -224,13 +251,14 @@ Layout:
 ```
 backend/
   graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
+  atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
                 builders.py · briefing.py (4-part diff) · seed.py
   simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py · runs.py
   ingestion/    markdown.py · documents.py · audio.py · extract.py · resolution.py · pipeline.py
   llm/          client.py (OpenAI-compatible, validated JSON) · mock.py (deterministic BDI)
   api/routes.py · main.py · config.py · tests/
-frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Branches,TimeTravel,Ingest}.tsx
-scripts/seed_demo_world.py
+frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Atlas,Branches,TimeTravel,Ingest}.tsx
+scripts/seed_demo_world.py · scripts/import_azgaar.py
 ```
 
 ## Notes & limitations

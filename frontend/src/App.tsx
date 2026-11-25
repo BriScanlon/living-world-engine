@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api, Branch, Health } from "./api";
 import { Badge, cx } from "./ui";
 import Branches from "./views/Branches";
@@ -7,10 +7,14 @@ import Forecaster from "./views/Forecaster";
 import Ingest from "./views/Ingest";
 import TimeTravel from "./views/TimeTravel";
 
-type View = "forecast" | "briefing" | "branches" | "time" | "ingest";
+// MapLibre is large: load the atlas only when its tab opens
+const Atlas = lazy(() => import("./views/Atlas"));
+
+type View = "forecast" | "briefing" | "atlas" | "branches" | "time" | "ingest";
 const NAV: { id: View; label: string }[] = [
   { id: "forecast", label: "Session Forecaster" },
   { id: "briefing", label: "DM Briefing" },
+  { id: "atlas", label: "World Atlas" },
   { id: "branches", label: "Branches" },
   { id: "time", label: "Time Travel" },
   { id: "ingest", label: "Ingest" },
@@ -95,6 +99,11 @@ export default function App() {
       <main className="mx-auto max-w-[1500px] px-5 py-6">
         {view === "forecast" && <Forecaster health={health} onOpenBriefing={openBriefing} onChanged={refresh} />}
         {view === "briefing" && <Briefing branches={branches} selected={selected} onSelect={setSelected} onChanged={refresh} />}
+        {view === "atlas" && (
+          <Suspense fallback={<div className="text-sm text-ink-400">Loading the atlas…</div>}>
+            <Atlas branches={branches} />
+          </Suspense>
+        )}
         {view === "branches" && <Branches branches={branches} onChanged={refresh} onOpenBriefing={openBriefing} />}
         {view === "time" && <TimeTravel branches={branches} />}
         {view === "ingest" && <Ingest branches={branches} health={health} onChanged={refresh} />}

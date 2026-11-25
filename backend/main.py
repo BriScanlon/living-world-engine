@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import router
+from atlas.service import bootstrap_sample
 from config import get_settings
 from graph.seed import seed
 from graph.store import get_store
@@ -31,6 +32,13 @@ def _bootstrap() -> None:
     if settings.seed_on_startup and (created or not store.all_documents("main", doc_type="Character")):
         result = seed(store)
         log.info("Seeded demo world: %s documents", result["documents"])
+    if settings.atlas_sample_on_startup:
+        try:
+            placed = bootstrap_sample(store)
+            if placed:
+                log.info("Imported sample atlas %s (%s documents)", placed["name"], placed["documents"])
+        except Exception:  # noqa: BLE001 - the dashboard still works without a map
+            log.exception("Sample atlas import failed")
 
 
 @asynccontextmanager

@@ -11,9 +11,10 @@ from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from atlas.service import atlas_path, atlas_state, bootstrap_sample, import_world, place_detail
 from config import get_settings
 from graph.briefing import build_briefing, load_run
 from graph.seed import DEMO_SESSION_SUMMARY, seed
@@ -67,7 +68,10 @@ def meta(branch: str = MAIN) -> dict[str, Any]:
 
 @router.post("/admin/seed")
 def admin_seed(reset: bool = True) -> dict[str, Any]:
-    return seed(_store(), reset=reset)
+    result = seed(_store(), reset=reset)
+    if get_settings().atlas_sample_on_startup:
+        result["atlas"] = bootstrap_sample(_store())
+    return result
 
 
 # =========================================================================== branches
@@ -201,6 +205,51 @@ def agent_view(agent_id: str, branch: str = MAIN, day: int | None = None) -> dic
     if agent_id not in w.docs:
         raise HTTPException(404, f"{agent_id} not active on {branch} at day {day}")
     return w.agent_context(agent_id)
+
+
+# =========================================================================== atlas
+ATLAS_FILES = {"land.geojson", "biomes.geojson", "provinces.geojson", "rivers.geojson", "roads.geojson",
+               "burgs.geojson", "tiles.pmtiles"}
+
+
+@router.get("/atlas")
+def atlas(branch: str = MAIN, day: int | None = None, compare: str | None = None) -> dict[str, Any]:
+    """Live map state: province controllers, places, events and rumors on ``day`` of ``branch``."""
+    try:
+        return atlas_state(_store(), branch, day, compare)
+    except Exception as e:  # noqa: BLE001
+        raise _err(e) from e
+
+
+@router.get("/atlas/place/{doc_id:path}")
+def atlas_place(doc_id: str, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
+    out = place_detail(_store(), doc_id, branch, day)
+    if not out:
+        raise HTTPException(404, f"{doc_id} not found on {branch}")
+    return out
+
+
+@router.get("/atlas/files/{slug}/{name}")
+def atlas_file(slug: str, name: str) -> FileResponse:
+    """Static layers: GeoJSON, or PMTiles (served with HTTP range support for the pmtiles client)."""
+    if name not in ATLAS_FILES or not slug.replace("-", "").isalnum():
+        raise HTTPException(404, "Unknown atlas file")
+    path = atlas_path(slug) / name
+    if not path.exists():
+        raise HTTPException(404, "Not built")
+    media = "application/geo+json" if name.endswith(".geojson") else "application/vnd.pmtiles"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.post("/atlas/import")
+def atlas_import(file: UploadFile = File(...), branch: str = Form(MAIN),
+                 place_greywater: bool = Form(False)) -> dict[str, Any]:
+    """Import an Azgaar 'Save > JSON > Full' export as a new atlas."""
+    path = _save_upload(file)
+    try:
+        return import_world(_store(), path, branch=branch, place_greywater=place_greywater)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 # =========================================================================== forecasts

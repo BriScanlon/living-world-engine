@@ -355,7 +355,7 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
             tgt = g.get("target")
             cc = []
             shifts = []
-            if tgt and tgt.startswith(("Location/", "Item/")):
+            if tgt and tgt.startswith(("Location/", "Province/", "Item/")):
                 cc = [ControlChange(target_id=tgt, new_controller_id=g["owner"],
                                     kind="OWNS" if tgt.startswith("Item/") else "CONTROLS")]
             elif tgt and tgt.startswith(AGENTISH):

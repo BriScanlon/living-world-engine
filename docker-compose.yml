@@ -32,6 +32,8 @@ services:
       TERMINUSDB_PASS: ${TERMINUSDB_ADMIN_PASS:-root}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend_data:/app/data
     depends_on:
       terminusdb:
         condition: service_healthy
@@ -56,3 +58,4 @@ services:
 
 volumes:
   terminusdb_data:
+  backend_data:

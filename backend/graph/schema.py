@@ -27,10 +27,10 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Vocabulary
 # ---------------------------------------------------------------------------
-NODE_TYPES = ["Character", "Faction", "Location", "Item", "Monster", "Event", "Rumor", "Goal"]
+NODE_TYPES = ["Character", "Faction", "Location", "Province", "Item", "Monster", "Event", "Rumor", "Goal"]
 AGENT_TYPES = ["Character", "Faction"]
 EDGE_TYPES = ["DesireEdge", "ControlEdge", "RelationshipEdge", "EpistemicEdge"]
-META_TYPES = ["ForecastRun", "Alias"]
+META_TYPES = ["ForecastRun", "Alias", "WorldAtlas"]
 
 DESIRE_KINDS = ["WANTS", "NEEDS", "FEARS"]
 CONTROL_KINDS = ["CONTROLS", "OWNS"]
@@ -107,14 +107,33 @@ SCHEMA: list[dict[str, Any]] = [
         "is_party": _opt("xsd:boolean"),
         "is_major": _opt("xsd:boolean"),
         "headquarters": _opt("Location"),
+        "color": _opt("xsd:string"),  # map colour for its territory
     },
     {
         "@type": "Class",
         "@id": "Location",
         "@inherits": ["Entity"],
         "@key": _LEX_UID,
-        "location_type": _opt("xsd:string"),  # town | district | tavern | wilderness | building
+        "location_type": _opt("xsd:string"),  # capital | city | town | district | tavern | wilderness | building
         "parent": _opt("Location"),
+        # Geography (atlas): WGS84-style lon/lat on the campaign planet
+        "lon": _opt("xsd:double"),
+        "lat": _opt("xsd:double"),
+        "province": _opt("Province"),
+        "population": _opt("xsd:integer"),
+    },
+    {
+        "@type": "Class",
+        "@id": "Province",
+        "@inherits": ["Entity"],
+        "@key": _LEX_UID,
+        "@documentation": {"@comment": "A territory polygon. The geometry lives in the atlas tiles (feature id = uid); "
+                                       "who holds it is a bi-temporal ControlEdge, so borders move with time and branch."},
+        "lon": _opt("xsd:double"),
+        "lat": _opt("xsd:double"),
+        "area_cells": _opt("xsd:integer"),
+        "population": _opt("xsd:integer"),
+        "atlas": _opt("xsd:string"),
     },
     {
         "@type": "Class",
@@ -234,6 +253,21 @@ SCHEMA: list[dict[str, Any]] = [
     },
     {
         "@type": "Class",
+        "@id": "WorldAtlas",
+        "@key": _LEX_UID,
+        "@documentation": {"@comment": "A generated or imported planet whose static layers live on disk (GeoJSON / PMTiles)."},
+        "uid": "xsd:string",
+        "name": "xsd:string",
+        "source": "xsd:string",  # e.g. azgaar-full-json, sample
+        "seed": _opt("xsd:string"),
+        "bbox": "xsd:string",  # JSON [west, south, east, north]
+        "centre": _opt("xsd:string"),  # JSON [lon, lat] to open the map on
+        "imported_at": "xsd:string",
+        "layers": "xsd:string",  # JSON list of layer names available on disk
+        "has_tiles": "xsd:boolean",
+    },
+    {
+        "@type": "Class",
         "@id": "ForecastRun",
         "@key": _LEX_UID,
         "uid": "xsd:string",
@@ -256,7 +290,7 @@ SCHEMA: list[dict[str, Any]] = [
 INT_FIELDS = {
     "in_world_start", "in_world_end", "resources", "influence", "value", "threat",
     "clock_segments", "clock_progress", "ticks_every_days", "trust_score",
-    "session_number", "start_day", "end_day",
+    "session_number", "start_day", "end_day", "population", "area_cells",
 }
 # Set-valued fields that TerminusDB omits when empty.
 SET_FIELDS = {"aliases", "tags", "actors", "targets"}
@@ -264,7 +298,7 @@ SET_FIELDS = {"aliases", "tags", "actors", "targets"}
 LINK_FIELDS = {
     "location", "faction", "headquarters", "parent", "owner", "target", "caused_by",
     "about_event", "from_id", "to_id", "target_id", "agent_id", "fact_or_event_id",
-    "source_event", "ended_by_event", "canonical", "actors", "targets",
+    "source_event", "ended_by_event", "canonical", "actors", "targets", "province",
 }
 # Provenance links that can be dropped when cherry-picking if their target is absent.
 SOFT_LINK_FIELDS = {"caused_by", "source_event", "ended_by_event", "about_event"}

@@ -176,6 +176,35 @@ export interface IngestJob {
   error: string | null;
 }
 
+export interface AtlasState {
+  atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean } | null;
+  branch: string;
+  compare: string | null;
+  day: number;
+  max_day: number;
+  factions: { id: string; name: string; color: string; provinces: number; party: boolean }[];
+  provinces: Record<string, { id: string; name: string; lon: number | null; lat: number | null; controller: string | null; controller_name: string | null; color: string; changed: boolean; previous: string | null }>;
+  places: GeoJSON.FeatureCollection;
+  events: GeoJSON.FeatureCollection;
+  rumors: GeoJSON.FeatureCollection;
+  changed_provinces: number;
+}
+
+export interface PlaceDetail {
+  id: string;
+  type: string;
+  name: string;
+  description: string | null;
+  kind: string | null;
+  population: number | null;
+  controller: Ref | null;
+  province: Ref | null;
+  people: { id: string; name: string; role: string | null }[];
+  events: { id: string; title: string; day: number; summary: string }[];
+  rumors: { dialogue: string; accuracy: string; speaker: string | null }[];
+  places: { id: string; name: string; kind: string | null }[];
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, init);
   if (!res.ok) {
@@ -243,4 +272,11 @@ export const api = {
     return req<{ text: string }>("/ingest/transcribe", { method: "POST", body: fd });
   },
   job: (id: string) => req<IngestJob>(`/ingest/jobs/${id}`),
+  atlas: (branch: string, day: number | null, compare: string | null) =>
+    req<AtlasState>(
+      `/atlas?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}${compare ? `&compare=${enc(compare)}` : ""}`,
+    ),
+  place: (id: string, branch: string, day: number | null) =>
+    req<PlaceDetail>(`/atlas/place/${id}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`),
+  atlasFile: (slug: string, name: string) => `/api/atlas/files/${slug}/${name}`,
 };
