@@ -49,7 +49,9 @@ export function WorldPanel({ scene }: { scene: Scene | null }) {
         {section('people', 'Who is here', scene.people?.length ?? 0, (
           <ul className="space-y-2">
             {scene.people!.map((p, i) => (
-              <li key={i}>
+              <li key={i} className="flex gap-2">
+                {p.portrait && <img src={p.portrait} alt="" className="h-10 w-10 shrink-0 rounded-full ring-1 ring-white/20" />}
+                <div className="min-w-0">
                 <div className="text-slate-100">{p.name} <span className="text-xs text-slate-400">{p.role}</span></div>
                 <div className="text-xs text-slate-400">
                   {[p.species, p.char_class, p.faction].filter(Boolean).join(' · ')}
@@ -57,6 +59,7 @@ export function WorldPanel({ scene }: { scene: Scene | null }) {
                 </div>
                 {!!p.wants?.length && <div className="text-xs text-sky-300">wants {p.wants.join('; ')}</div>}
                 {!!p.fears?.length && <div className="text-xs text-rose-300">fears {p.fears.join('; ')}</div>}
+                </div>
               </li>
             ))}
           </ul>

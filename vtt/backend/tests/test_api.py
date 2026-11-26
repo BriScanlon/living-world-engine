@@ -168,3 +168,42 @@ def test_map_view_reports_true_scale_for_the_world_engine():
         v = client.get(f"/api/maps/{gen['id']}/view").json()
         assert v["mode"] == "scale" and v["width"] == 3840
         assert abs(v["metresPerPx"] - 1.524 / (3840 / 28)) < 1e-6  # 140 ft across
+
+
+def test_session_log_records_notes_maps_and_scenes():
+    with TestClient(app) as client:
+        assert client.delete("/api/session-log").json()["ok"]
+        job = client.post("/api/generate", json={"description": "burned warehouse on the docks", "animate": False,
+                                                  "title": "The Docks (day 14)", "tags": ["lwe:Location/the-docks"]}).json()
+        done = _wait_job(client, job["id"])
+        assert client.get(f"/api/jobs/{job['id']}").json()["status"] == "done"
+        asset = client.get(f"/api/maps/{done['result_asset_id']}").json()
+        assert asset["title"] == "The Docks (day 14)" and asset["tags"] == ["lwe:Location/the-docks"]
+        client.post(f"/api/maps/{asset['id']}/push")
+        client.post("/api/scene", json={"place": {"id": "Location/the-docks", "name": "The Docks"}, "day": 14,
+                                        "branch": "forecast/s14"})
+        assert client.post("/api/session-log", json={"text": "The party torched the Guild's warehouse."}).status_code == 200
+        assert client.post("/api/session-log", json={"text": ""}).status_code == 422
+        entries = client.get("/api/session-log").json()["entries"]
+        assert [e["kind"] for e in entries] == ["map", "scene", "note"]
+        assert entries[1]["text"] == "Scene: The Docks (day 14, forecast/s14)" and entries[1]["meta"]["day"] == 14
+        client.delete(f"/api/session-log/{entries[0]['id']}")
+        assert len(client.get("/api/session-log").json()["entries"]) == 2
+    with TestClient(app) as client:  # survives a restart, cleared for a new session
+        assert len(client.get("/api/session-log").json()["entries"]) == 2
+        client.delete("/api/session-log")
+        assert client.get("/api/session-log").json()["entries"] == []
+        assert client.get("/api/jobs/nope").status_code == 404
+
+
+def test_token_jobs_paint_tagged_portraits():
+    with TestClient(app) as client:
+        job = client.post("/api/tokens", json={"name": "Wenna Tull", "description": "a weathered human tavern keeper",
+                                               "tags": ["lwe:Character/wenna-tull"]}).json()
+        done = _wait_job(client, job["id"])
+        assert done["status"] == "done", done
+        tokens = client.get("/api/maps?type=token").json()
+        t = next(t for t in tokens if t["id"] == done["result_asset_id"])
+        assert t["title"] == "Wenna Tull" and t["tags"] == ["lwe:Character/wenna-tull"] and t["thumb_url"]
+        assert client.get(t["media_url"]).status_code == 200
+        assert client.post("/api/tokens", json={"name": "x", "description": "ok desc", "tags": ["a" * 200]}).status_code == 400

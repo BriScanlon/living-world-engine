@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FogStore } from './fog'
-import type { Asset, FogOp, Job, Scene, TableState } from './types'
+import type { Asset, FogOp, Job, LogEntry, Scene, TableState } from './types'
 
 export type Role = 'table' | 'dm'
 
@@ -23,6 +23,7 @@ export function useTableSync(role: Role) {
   const [jobs, setJobs] = useState<Job[]>([])
   const [libraryVersion, setLibraryVersion] = useState(0)
   const [scene, setScene] = useState<Scene | null>(null)
+  const [log, setLog] = useState<LogEntry[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
   const [fogMeta, setFogMeta] = useState({ enabled: false, base: 'hidden' as 'hidden' | 'revealed', count: 0 })
   const fog = useMemo(() => new FogStore(), [])
@@ -112,6 +113,12 @@ export function useTableSync(role: Role) {
             setScene(msg.scene ?? null)
             if (msg.scene?.place?.name) toast(`World: ${msg.scene.place.name}`, 'info')
             break
+          case 'log_full':
+            setLog(msg.entries ?? [])
+            break
+          case 'log_entry':
+            setLog((l) => (l.some((e) => e.id === msg.entry.id) ? l : [...l, msg.entry]))
+            break
         }
       }
     }
@@ -148,7 +155,7 @@ export function useTableSync(role: Role) {
     [fog, send],
   )
 
-  return { state, connected, send, patch, fog, fogMeta, sendFogOp, jobs, libraryVersion, scene, toasts, toast }
+  return { state, connected, send, patch, fog, fogMeta, sendFogOp, jobs, libraryVersion, scene, log, toasts, toast }
 }
 
 function deepMerge<T>(base: T, patch: any): T {

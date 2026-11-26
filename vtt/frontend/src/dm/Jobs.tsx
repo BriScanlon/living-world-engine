@@ -11,12 +11,13 @@ const STAGES: Record<Job['kind'], { key: Job['stage']; label: string }[]> = {
     { key: 'prompting', label: 'Vision prompt' },
     { key: 'animating', label: 'Animating' },
   ],
+  token: [{ key: 'base_map', label: 'Portrait' }],
 }
 const ORDER: Job['stage'][] = ['queued', 'prompting', 'base_map', 'animating', 'saving', 'done']
 
 function title(job: Job) {
-  const i = job.input as { description?: string; title?: string }
-  return i.description ?? i.title ?? job.kind
+  const i = job.input as { description?: string; title?: string; name?: string }
+  return i.name ?? i.title ?? i.description ?? job.kind
 }
 
 export function Jobs({ jobs }: { jobs: Job[] }) {
@@ -34,7 +35,7 @@ export function Jobs({ jobs }: { jobs: Job[] }) {
               <li key={job.id} className="rounded-lg bg-slate-800/60 p-3 ring-1 ring-white/5">
                 <div className="mb-1.5 flex items-center justify-between gap-2">
                   <span className="truncate text-sm text-slate-200" title={title(job)}>
-                    {job.kind === 'animate' ? '🎞️' : '✦'} {title(job)}
+                    {job.kind === 'animate' ? '🎞️' : job.kind === 'token' ? '◉' : '✦'} {title(job)}
                   </span>
                   <span
                     className={`shrink-0 text-xs font-medium ${

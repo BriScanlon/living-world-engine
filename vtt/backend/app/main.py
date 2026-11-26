@@ -91,6 +91,19 @@ class GenerateRequest(BaseModel):
     style: str = Field(default="", max_length=80)
     animate: bool = True
     push: bool = False
+    title: str | None = Field(default=None, max_length=80)
+    # e.g. "lwe:Location/the-docks", so the world engine can find what it asked for
+    tags: list[str] = Field(default_factory=list, max_length=8)
+
+
+class TokenRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=3, max_length=600)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+
+
+class LogNote(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
 
 
 class AssetPatch(BaseModel):
@@ -217,9 +230,22 @@ async def clear_scene() -> dict:
     return {"ok": True}
 
 
+def _check_tags(tags: list[str]) -> None:
+    if any(len(t) > 120 for t in tags):
+        raise HTTPException(400, "Tags must be at most 120 characters")
+
+
 @app.post("/api/generate")
 async def generate(req: GenerateRequest) -> dict:
+    _check_tags(req.tags)
     return await svc.jobs.submit("generate", req.model_dump())
+
+
+@app.post("/api/tokens")
+async def generate_token(req: TokenRequest) -> dict:
+    """Paint a round top-down token (portrait) for a character or creature."""
+    _check_tags(req.tags)
+    return await svc.jobs.submit("token", req.model_dump())
 
 
 @app.post("/api/upload")
@@ -256,6 +282,42 @@ async def list_jobs() -> list[dict]:
     return svc.db.list_jobs()
 
 
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str) -> dict:
+    job = svc.db.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
+# ------------------------------------------------------------------ session log
+@app.get("/api/session-log")
+async def get_session_log() -> dict:
+    """What happened at the table this session: DM notes, maps shown, world scenes visited.
+    The world engine reads it to pre-fill the next forecast's session summary."""
+    return {"entries": svc.db.list_log()}
+
+
+@app.post("/api/session-log")
+async def add_session_note(note: LogNote) -> dict:
+    return await svc.table.log("note", note.text.strip())
+
+
+@app.delete("/api/session-log/{entry_id}")
+async def delete_session_entry(entry_id: int) -> dict:
+    svc.db.delete_log(entry_id)
+    await svc.hub.broadcast({"type": "log_full", "entries": svc.db.list_log()}, role="dm")
+    return {"ok": True}
+
+
+@app.delete("/api/session-log")
+async def clear_session_log() -> dict:
+    """Start a new session."""
+    svc.db.clear_log()
+    await svc.hub.broadcast({"type": "log_full", "entries": []}, role="dm")
+    return {"ok": True}
+
+
 @app.post("/api/library/changed")
 async def library_changed() -> dict:
     """Lets out-of-process tools (the seeder CLI) tell open /dm panels to refresh."""
@@ -277,6 +339,7 @@ async def websocket(ws: WebSocket) -> None:
         if role == "dm":
             await svc.hub.send(ws, {"type": "jobs", "jobs": svc.db.list_jobs()})
             await svc.hub.send(ws, {"type": "scene", "scene": svc.table.scene})
+            await svc.hub.send(ws, {"type": "log_full", "entries": svc.db.list_log()})
         await svc.table.broadcast_clients()
         while True:
             msg = await ws.receive_json()

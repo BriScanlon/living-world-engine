@@ -166,7 +166,7 @@ def build_scene(store: GraphStore, place_id: str, branch: str = "main", day: int
         "province": w.name(province) if province else None,
         "realm": w.name(realm) if realm else None,
         "map": {"title": map_title, "vtt_map_id": vtt_map_id} if vtt_map_id else None,
-        "people": [{"name": c["name"], "role": c.get("role"), "species": c.get("species"),
+        "people": [{"id": c["@id"], "name": c["name"], "role": c.get("role"), "species": c.get("species"),
                     "char_class": c.get("char_class"), "faction": w.name(c["faction"]) if c.get("faction") else None,
                     "stats": _stats(c.get("srd_ref")), "wants": desires(c["@id"], ("WANTS", "NEEDS")),
                     "fears": desires(c["@id"], ("FEARS",))} for c in people],
@@ -190,6 +190,13 @@ def to_table(store: GraphStore, place_id: str, branch: str = "main", day: int | 
         client.push_map(chosen["vtt_map_id"])
     scene = build_scene(store, place_id, branch, day, chosen["name"] if chosen else None,
                         chosen["vtt_map_id"] if chosen else None)
+    from vtt_link.session import portraits
+    try:
+        faces = portraits() if scene["people"] else {}
+    except client.VTTError:
+        faces = {}
+    for p in scene["people"]:
+        p["portrait"] = faces.get(p["id"])
     client.send_scene(scene)
     return {"map": chosen, "scene": {"place": scene["place"]["name"], "people": len(scene["people"]),
                                      "rumors": len(scene["rumors"]), "creatures": len(scene["creatures"])}}

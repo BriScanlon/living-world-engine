@@ -358,6 +358,79 @@ def place_to_table(place_id: str, body: ToTableBody) -> dict[str, Any]:
         raise HTTPException(404, str(e)) from e
 
 
+class PaintMapBody(BaseModel):
+    branch: str = MAIN
+    day: int | None = None
+    style: str = ""
+    animate: bool = False
+    description: str | None = None  # override the generated brief
+
+
+@router.get("/places/{place_id:path}/map-brief")
+def place_map_brief(place_id: str, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
+    """The description the VTT would paint this place from, as it stands on that branch and day."""
+    from vtt_link.session import map_brief
+    try:
+        return map_brief(_store(), place_id, branch, day)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.post("/places/{place_id:path}/paint-map")
+def place_paint_map(place_id: str, body: PaintMapBody) -> dict[str, Any]:
+    """Ask the VTT to paint this place as it is now; poll /vtt/jobs/{job}/collect to link the result."""
+    from vtt_link import client
+    from vtt_link.session import paint_map
+    try:
+        return paint_map(_store(), place_id, body.branch, body.day, style=body.style, animate=body.animate,
+                         description=body.description)
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.get("/vtt/jobs/{job_id}/collect")
+def vtt_collect(job_id: str) -> dict[str, Any]:
+    """A paint job's progress; once it's done, its map is linked to the place from the day it was painted for."""
+    from vtt_link import client
+    from vtt_link.session import collect
+    try:
+        return collect(_store(), job_id)
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+
+
+class TokensBody(BaseModel):
+    branch: str = MAIN
+    day: int | None = None
+    redo: bool = False
+
+
+@router.post("/places/{place_id:path}/tokens")
+def place_tokens(place_id: str, body: TokensBody) -> dict[str, Any]:
+    """Queue portrait tokens on the VTT for the people at a place who haven't got one."""
+    from vtt_link import client
+    from vtt_link.session import paint_tokens
+    try:
+        return paint_tokens(_store(), place_id, body.branch, body.day, body.redo)
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.get("/vtt/session-log")
+def vtt_session_log() -> dict[str, Any]:
+    """The table's session log as a summary for the next forecast."""
+    from vtt_link import client
+    from vtt_link.session import from_table
+    try:
+        return from_table()
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+
+
 # =========================================================================== campaigns (one database per world)
 @router.get("/campaigns")
 def campaigns() -> list[dict[str, Any]]:

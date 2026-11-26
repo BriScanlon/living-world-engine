@@ -1,4 +1,4 @@
-import type { AppConfig, Asset, Job } from './types'
+import type { AppConfig, Asset, Job, LogEntry } from './types'
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -32,6 +32,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then((r) => json<Job>(r)),
+  addNote: (text: string) =>
+    fetch('/api/session-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).then((r) => json<LogEntry>(r)),
+  deleteLogEntry: (id: number) => fetch(`/api/session-log/${id}`, { method: 'DELETE' }).then((r) => json(r)),
+  newSession: () => fetch('/api/session-log', { method: 'DELETE' }).then((r) => json(r)),
 }
 
 /** Multipart upload with progress (4K PNGs are 10-30 MB). */

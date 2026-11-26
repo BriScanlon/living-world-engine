@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap, Marker } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, Branch, PlaceDetail, VttMap } from "../api";
+import { api, AtlasState, Branch, MapBrief, PaintStatus, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -493,7 +493,92 @@ function TableLink({ detail, branch, day, onChanged }: { detail: PlaceDetail; br
           return `Linked from day ${day ?? "now"}.`;
         })}>{busy === "link" ? <Spinner /> : "Link"}</Button>
       </div>
+      <PaintPlace detail={detail} branch={branch} day={day} onChanged={onChanged} busy={!!busy}
+        onTokens={() => run("tokens", async () => {
+          const r = await api.paintTokens(detail.id, { branch, day });
+          if (!r.queued.length) return r.already.length ? "Everyone here already has a portrait." : "Nobody is here to paint.";
+          return `Painting ${plural(r.queued.length, "portrait")} on the VTT${r.already.length ? ` (${r.already.length} already done)` : ""}. They show in the World panel next time you send the scene.`;
+        })} tokensBusy={busy === "tokens"} />
       {note && <p className="mt-1.5 text-xs text-emerald-300">{note}</p>}
+      {err && <p className="mt-1.5 text-xs text-rose-300">{err}</p>}
+    </div>
+  );
+}
+
+/** Paint this place on the VTT as it stands on this branch and day, then link the map from that day. */
+function PaintPlace({ detail, branch, day, onChanged, busy, onTokens, tokensBusy }: {
+  detail: PlaceDetail; branch: string; day: number | null; onChanged: () => void;
+  busy: boolean; onTokens: () => void; tokensBusy: boolean;
+}) {
+  const [brief, setBrief] = useState<MapBrief | null>(null);
+  const [text, setText] = useState("");
+  const [job, setJob] = useState<PaintStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { setBrief(null); setJob(null); setErr(null); }, [detail.id, branch, day]);
+
+  const open = async () => {
+    setErr(null);
+    try {
+      const b = await api.mapBrief(detail.id, branch, day);
+      setBrief(b); setText(b.description);
+    } catch (e) { setErr((e as Error).message); }
+  };
+
+  const paint = async () => {
+    if (!brief) return;
+    setErr(null);
+    try {
+      const r = await api.paintMap(detail.id, { branch, day: brief.day, description: text !== brief.description ? text : undefined });
+      setJob({ job: r.job, status: "queued", progress: 0, message: "Queued", error: null, linked: null });
+      setBrief(null);
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 2000));
+        if (!alive.current) return;
+        const s = await api.collectPaint(r.job);
+        if (!alive.current) return;
+        setJob(s);
+        if (s.status === "error") { setErr(s.error ?? "The VTT couldn't paint it"); return; }
+        if (s.linked) { onChanged(); return; }
+      }
+    } catch (e) { setErr((e as Error).message); }
+  };
+
+  const running = job && !job.linked && job.status !== "error";
+  return (
+    <div className="mt-2 border-t border-ink-800 pt-2">
+      {!brief && (
+        <div className="flex flex-wrap gap-1.5">
+          <Button disabled={busy || !!running} onClick={open} title="Paint a battle map of this place as it is now, from world state">
+            ✦ Paint it as it is{day !== null ? ` on day ${day}` : ""}
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={onTokens} title="Portrait tokens for the people here">
+            {tokensBusy ? <Spinner /> : "◉"} Portraits
+          </Button>
+        </div>
+      )}
+      {brief && (
+        <div className="space-y-1.5">
+          <div className="text-xs text-ink-400">
+            The VTT paints from this brief{brief.events.length ? `, after ${brief.events.join("; ")}` : ""}. Edit it if you like.
+          </div>
+          <textarea className={cx(inputCls, "h-28 resize-y text-xs leading-snug")} maxLength={600} value={text}
+            onChange={(e) => setText(e.target.value)} />
+          <div className="flex gap-1.5">
+            <Button variant="primary" disabled={text.trim().length < 3} onClick={paint}>Paint “{brief.title}”</Button>
+            <Button variant="ghost" onClick={() => setBrief(null)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {job && (
+        <p className={cx("mt-1.5 text-xs", job.linked ? "text-emerald-300" : "text-ink-300")}>
+          {job.linked
+            ? `Painted and linked from day ${job.linked.day}. Press Show to put it on the table.`
+            : job.status === "error" ? null
+            : <><Spinner /> Painting on the VTT… {job.progress != null ? `${Math.round(job.progress * 100)}%` : ""} {job.message ?? ""}</>}
+        </p>
+      )}
       {err && <p className="mt-1.5 text-xs text-rose-300">{err}</p>}
     </div>
   );

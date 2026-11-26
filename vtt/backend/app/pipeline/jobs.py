@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..config import settings
 from ..db import Database
 from ..hub import Hub
 from . import flows
@@ -97,7 +98,12 @@ class JobManager:
         if job["kind"] == "generate":
             asset = await flows.generate_map(
                 self.db, description=p["description"], style=p.get("style", ""), report=report,
-                animate=p.get("animate", True),
+                animate=p.get("animate", True), title=p.get("title") or None, tags=p.get("tags") or None,
+            )
+        elif job["kind"] == "token":
+            asset = await flows.generate_token(
+                self.db, name=p["name"], description=p["description"], report=report, pack=None,
+                out_dir=settings.maps_dir / "tokens", tags=p.get("tags") or None,
             )
         elif job["kind"] == "animate":
             asset = await flows.animate_image(
