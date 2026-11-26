@@ -155,7 +155,7 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
     atlases = [d for d in full.all.values() if d["@type"] == "WorldAtlas"]
     if not atlases:
         return {"atlas": None}
-    a = atlases[0]
+    a = max(atlases, key=lambda d: d.get("imported_at") or "")  # the most recently imported world
     # "No day" means "now on this branch": the latest day it knows about, so ended facts drop out.
     the_day = day if day is not None else full.max_day()
     w = WorldView(docs, the_day)

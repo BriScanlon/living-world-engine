@@ -246,8 +246,11 @@ def atlas_import(file: UploadFile = File(...), branch: str = Form(MAIN),
                  place_greywater: bool = Form(False)) -> dict[str, Any]:
     """Import an Azgaar 'Save > JSON > Full' export as a new atlas."""
     path = _save_upload(file)
+    store = _store()
+    if not store.branch_exists(branch):
+        store.create_branch(branch, MAIN)  # review a new world on its own branch before merging
     try:
-        return import_world(_store(), path, branch=branch, place_greywater=place_greywater)
+        return import_world(store, path, branch=branch, place_greywater=place_greywater)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
