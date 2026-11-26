@@ -46,7 +46,8 @@ def health() -> dict[str, Any]:
         tdb = {"ok": True, "version": info.get("terminusdb", {}).get("version")}
     except Exception as e:  # noqa: BLE001
         tdb = {"ok": False, "error": str(e)}
-    return {"status": "ok", "terminusdb": tdb, "mock_llm": s.mock_llm,
+    return {"status": "ok", "terminusdb": tdb, "mock_llm": s.mock_llm, "campaign": _store().db,
+            "default_campaign": s.terminusdb_db,
             "llm_model": None if s.mock_llm else s.llm_model, "database": s.terminusdb_db,
             "docling": documents.docling_available(), "whisper": audio.whisper_available()}
 
@@ -253,6 +254,97 @@ def atlas_import(file: UploadFile = File(...), branch: str = Form(MAIN),
         return import_world(store, path, branch=branch, place_greywater=place_greywater)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+
+# =========================================================================== campaigns (one database per world)
+@router.get("/campaigns")
+def campaigns() -> list[dict[str, Any]]:
+    return _store().list_campaigns()
+
+
+class CampaignBody(BaseModel):
+    id: str
+
+
+@router.post("/campaigns/active")
+def campaign_activate(body: CampaignBody) -> dict[str, Any]:
+    from graph.store import set_active_campaign
+    try:
+        set_active_campaign(body.id)
+    except GraphStoreError as e:
+        raise _err(e) from e
+    return {"active": body.id}
+
+
+@router.delete("/campaigns/{campaign_id}")
+def campaign_delete(campaign_id: str) -> dict[str, Any]:
+    store = _store()
+    if campaign_id == store.db:
+        raise HTTPException(400, "Switch to another campaign before deleting this one")
+    try:
+        store.delete_campaign(campaign_id)
+    except GraphStoreError as e:
+        raise _err(e) from e
+    return {"deleted": campaign_id}
+
+
+# =========================================================================== new-world wizard
+@router.get("/wizard/spec")
+def wizard_spec() -> dict[str, Any]:
+    from wizard.spec import spec
+    return spec()
+
+
+@router.post("/wizard/upload")
+def wizard_upload(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Stash an Azgaar Full JSON export for the wizard's 'use my Azgaar export' option."""
+    import uuid as _uuid
+
+    from atlas.azgaar import AzgaarWorld
+    from wizard.builder import upload_dir
+    uid = _uuid.uuid4().hex[:12]
+    path = upload_dir() / f"{uid}.json"
+    with open(path, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    try:
+        w = AzgaarWorld.load(path)
+    except (ValueError, json.JSONDecodeError) as e:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, str(e)) from e
+    return {"upload_id": uid, "name": w.name, "states": len(w.live(w.raw["pack"].get("states", [])))}
+
+
+@router.post("/wizard/build")
+def wizard_build(answers: dict[str, Any]) -> dict[str, Any]:
+    from wizard.builder import start_build
+    return start_build(answers).dump()
+
+
+@router.get("/wizard/jobs/{job_id}")
+def wizard_job(job_id: str) -> dict[str, Any]:
+    from wizard.builder import JOBS
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Unknown job")
+    return job.dump()
+
+
+# =========================================================================== SRD 5.2.1 reference
+@router.get("/srd")
+def srd_info() -> dict[str, Any]:
+    from srd import catalogue
+    c = catalogue.load()
+    return {"attribution": c.get("attribution"), "license": c.get("license"),
+            "counts": {k: len(c.get(k, [])) for k in ("monsters", "magic_items", "species", "classes", "backgrounds")}}
+
+
+@router.get("/srd/entry/{entry_id:path}")
+def srd_entry(entry_id: str) -> dict[str, Any]:
+    from srd import catalogue
+    e = catalogue.by_id(entry_id)
+    if not e:
+        raise HTTPException(404, "Not in the SRD catalogue")
+    return e
 
 
 # =========================================================================== forecasts

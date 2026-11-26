@@ -189,7 +189,11 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
         places.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": list(xy)},
                        "properties": {"id": loc["@id"], "name": loc["name"], "kind": loc.get("location_type") or "place",
                                       "people": people.get(loc["@id"], []),
-                                      "campaign": not loc.get("source_session", "").startswith("import/")}})
+                                      "campaign": not loc.get("source_session", "").startswith("import/"),
+                                      # where play begins: the wizard's start town, or the hand-built demo's town
+                                      "start": "campaign-start" in loc.get("tags", [])
+                                      or (loc.get("location_type") == "town"
+                                          and loc.get("source_session", "").startswith("session-"))}})
 
     base_events = {e["@id"] for e in cw.of_type("Event")} if cw else set()
     events = []
@@ -242,8 +246,11 @@ def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int 
         "kind": d.get("location_type"), "population": d.get("population"),
         "controller": {"id": ctl, "name": w.name(ctl)} if ctl else None,
         "province": {"id": d["province"], "name": w.name(d["province"])} if d.get("province") else None,
-        "people": [{"id": c["@id"], "name": c["name"], "role": c.get("role")} for c in w.of_type("Character")
+        "people": [{"id": c["@id"], "name": c["name"], "role": c.get("role"), "species": c.get("species"),
+                    "char_class": c.get("char_class"), "srd_ref": c.get("srd_ref")} for c in w.of_type("Character")
                    if c.get("location") in inside],
+        "monsters": [{"id": m["@id"], "name": m["name"], "challenge": m.get("challenge"), "srd_ref": m.get("srd_ref")}
+                     for m in w.of_type("Monster") if m.get("location") in inside],
         "events": sorted(({"id": e["@id"], "title": e["name"], "day": e.get("in_world_start"), "summary": e.get("summary")}
                           for e in w.of_type("Event") if e.get("location") in inside or set(e.get("targets", [])) & inside),
                          key=lambda e: -(e["day"] or 0))[:12],

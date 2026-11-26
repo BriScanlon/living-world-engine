@@ -246,7 +246,7 @@ def _first_paragraph(body: str) -> str | None:
 def start_job(sources: list[Source], branch: str, day: int | None, store: GraphStore | None = None) -> Job:
     job = Job(id=uuid.uuid4().hex[:12], branch=branch, sources=[s.name for s in sources])
     JOBS[job.id] = job
-    store = store or get_store()
+    store = (store or get_store()).bound()  # pinned to the campaign the job started in
 
     def work() -> None:
         job.status = "running"

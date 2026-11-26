@@ -216,12 +216,15 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     // HTML labels (no glyph server needed): capitals and the campaign's own places
     markers.current.forEach((m) => m.remove());
     markers.current = state.places.features
-      .filter((f) => f.properties?.campaign ? f.properties?.kind === "town" : f.properties?.kind === "capital")
+      .filter((f) => ["capital", "continent"].includes(f.properties?.kind) || f.properties?.start)
       .map((f) => {
         const el = document.createElement("div");
         el.textContent = f.properties?.name;
         el.className = "atlas-label";
-        el.style.cssText = `font:600 11px system-ui;color:${f.properties?.campaign ? "#f5c77e" : "#e6eaf0"};text-shadow:0 0 3px #000,0 0 2px #000;pointer-events:none;transform:translateY(-12px);white-space:nowrap`;
+        const continent = f.properties?.kind === "continent";
+        el.style.cssText = continent
+          ? "font:italic 600 14px Georgia,serif;letter-spacing:.12em;text-transform:uppercase;color:#f3ead2;opacity:.85;text-shadow:0 0 4px #000;pointer-events:none;white-space:nowrap"
+          : `font:600 11px system-ui;color:${f.properties?.start ? "#f5c77e" : "#e6eaf0"};text-shadow:0 0 3px #000,0 0 2px #000;pointer-events:none;transform:translateY(-12px);white-space:nowrap`;
         return new maplibregl.Marker({ element: el, anchor: "bottom" })
           .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
           .addTo(map);
@@ -301,7 +304,12 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
                 {detail.controller && <div><span className="text-ink-400">Held by</span> <span className="text-ink-100">{detail.controller.name}</span></div>}
                 {detail.province && <div><span className="text-ink-400">Province</span> <button className="text-ember-300 hover:underline" onClick={() => openDetail(detail.province!.id)}>{detail.province.name}</button></div>}
               </div>
-              {!!detail.people.length && <Section title="Who's here">{detail.people.map((p) => <li key={p.id}>{p.name} <span className="text-ink-400">{p.role}</span></li>)}</Section>}
+              {!!detail.people.length && <Section title="Who's here">{detail.people.map((p) => (
+                <li key={p.id}>{p.name} <span className="text-ink-400">{p.role}{p.species ? ` · ${p.species}` : ""}{p.char_class ? ` ${p.char_class}` : ""}{p.srd_ref ? ` · SRD ${p.srd_ref.replace("srd:", "")}` : ""}</span></li>
+              ))}</Section>}
+              {!!detail.monsters?.length && <Section title="Creatures (SRD)">{detail.monsters.map((m) => (
+                <li key={m.id}>{m.name} <span className="text-ink-400">CR {m.challenge}</span></li>
+              ))}</Section>}
               {!!detail.places.length && <Section title="Places">{detail.places.map((p) => <li key={p.id}><button className="text-ember-300 hover:underline" onClick={() => openDetail(p.id)}>{p.name}</button> <span className="text-ink-400">{p.kind}</span></li>)}</Section>}
               {!!detail.events.length && <Section title="What happened">{detail.events.map((e) => <li key={e.id}><span className="font-mono text-xs text-ink-400">d{e.day}</span> {e.title}</li>)}</Section>}
               {!!detail.rumors.length && <Section title="Rumors heard here">{detail.rumors.map((r, i) => <li key={i} className="italic">{r.dialogue} <Badge tone={accuracyTone(r.accuracy)}>{r.accuracy}</Badge></li>)}</Section>}

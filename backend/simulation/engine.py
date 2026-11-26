@@ -514,13 +514,14 @@ def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | Non
 
 def start_forecast(req: ForecastRequest) -> Run:
     run = registry.create(branch_name(req.session_number), req.model_dump())
-    t = threading.Thread(target=lambda: _safe(run), name=f"forecast-{run.id}", daemon=True)
+    store = get_store().bound()  # keep writing to this campaign even if the user switches
+    t = threading.Thread(target=lambda: _safe(run, store), name=f"forecast-{run.id}", daemon=True)
     t.start()
     return run
 
 
-def _safe(run: Run) -> None:
+def _safe(run: Run, store: GraphStore | None = None) -> None:
     try:
-        run_sync(run)
+        run_sync(run, store)
     except Exception:
         pass

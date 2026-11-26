@@ -45,6 +45,8 @@ On first start the backend creates the `living_world` database, applies the sche
    to watch provinces change hands day by day.
 4. **Time Travel** → pick a branch, drag the in-world day slider, or pick a historic commit.
 5. **Ingest** → drop Obsidian notes / PDFs / Word docs (try the files in `sample_data/`).
+6. **✦ New World** → answer (or roll) five Guidebook-style steps and build a fresh campaign world; switch between
+   worlds from the campaign menu in the header.
 
 Ports already in use? Override `FRONTEND_PORT`, `BACKEND_PORT`, `TERMINUSDB_PORT` in `.env`.
 
@@ -170,7 +172,35 @@ A MapLibre GL **globe** of the campaign planet that shows the simulation for any
   format* (`backend/atlas/sample_world.py`; hex cells instead of Voronoi), imports it, and places Greywater on a port
   town as a vassal of the local realm. Azgaar's repo only ships `.map` saves, which don't store cell polygons.
 
-### 5. DM dashboard (`frontend/`)
+### 5. New-world wizard and campaigns (`backend/wizard/`, `frontend/src/views/NewWorld.tsx`)
+
+**✦ New World** builds a complete campaign world in a few seconds, asking questions in the decision order of the
+AD&D *World Builder's Guidebook* (the order only; wording, options and tables are the engine's own):
+
+| Step | You choose | The engine creates (one `[setup]` commit each) |
+| --- | --- | --- |
+| Approach & focus | Planet-in, Kingdom-first, Local-out or Literary; a campaign focus (seafaring, court intrigue, frontier, dying world, holy war…) that pre-fills every step | — |
+| 1 World | name, seed, climate band, detail, or *use my Azgaar export* | the planet and its atlas layers (PMTiles in Docker) |
+| 2 Continents | shape of the land | named continents and islands |
+| 3 Kingdoms | realms, how hostile, cultures and naming style, peoples (SRD species), religions | realms, provinces, towns, diplomacy, border claims and war goals; a ruler per realm; churches, cults and their gods |
+| 4 Local area | starting town, tavern, the local power struggle, notable NPCs, party name, rarity of a contested magic item | two rival local factions, NPCs with conflicting WANTS / NEEDS / FEARS, debts and secrets, goal clocks, an SRD magic item both sides want, the party, opening rumors |
+| 5 History | years of history, ages, a defining catastrophe, a hero's saga, monster density, party level band | founding and wars (negative in-world days), the catastrophe and its lair, a legendary hero, SRD monsters in every province's wilds |
+
+Every 🎲 rolls a field; *Surprise me* rolls a whole step. The approach changes the order you answer in; the world is
+always built planet-first because a town needs a planet to sit on.
+
+**Campaigns.** Each world is its own TerminusDB database, so worlds never mix. Switch between them from the menu in the
+header (`GET /api/campaigns`, `POST /api/campaigns/active`); the choice is remembered across restarts, and running
+forecasts and imports keep writing to the campaign they started in. The Greywater demo stays the default campaign.
+
+### 6. SRD 5.2.1 content (`backend/srd/`)
+
+A read-only catalogue built from the System Reference Document 5.2.1 by `scripts/build_srd_catalogue.py`: 328 monster
+and animal stat blocks, 259 magic items, 9 species, 12 classes, 4 backgrounds and price lines. The wizard uses it for
+NPC species, classes and stat-block templates (`srd_ref`), each biome's bestiary within a challenge-rating window, and
+the contested magic item. See [backend/srd/README.md](backend/srd/README.md).
+
+### 7. DM dashboard (`frontend/`)
 
 * **Session Forecaster** — session #, start/end day, days until next session, summary (paste,
   upload, or transcribe audio); live per-node progress via server-sent events.
@@ -211,6 +241,9 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/atlas?branch=&day=&compare=` | live map state: territory, places, events, rumors |
 | GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |
 | POST | `/api/atlas/import` | import an Azgaar Full JSON export |
+| GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
+| GET · POST · DELETE | `/api/campaigns` · `/api/campaigns/active` · `/api/campaigns/{id}` | campaigns (one database per world) |
+| GET | `/api/srd` · `/api/srd/entry/{id}` | SRD catalogue info and entries |
 | POST | `/api/ingest/files` · `/ingest/text` · `/ingest/audio` · `/ingest/transcribe` | ingestion |
 | POST | `/api/admin/seed?reset=true` | reset to the demo world |
 
@@ -252,13 +285,15 @@ Layout:
 backend/
   graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
   atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
+  wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
+  srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
                 builders.py · briefing.py (4-part diff) · seed.py
   simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py · runs.py
   ingestion/    markdown.py · documents.py · audio.py · extract.py · resolution.py · pipeline.py
   llm/          client.py (OpenAI-compatible, validated JSON) · mock.py (deterministic BDI)
   api/routes.py · main.py · config.py · tests/
-frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Atlas,Branches,TimeTravel,Ingest}.tsx
-scripts/seed_demo_world.py · scripts/import_azgaar.py
+frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Atlas,Branches,TimeTravel,Ingest,NewWorld}.tsx
+scripts/seed_demo_world.py · scripts/import_azgaar.py · scripts/build_srd_catalogue.py
 ```
 
 ## Notes & limitations
@@ -273,6 +308,14 @@ scripts/seed_demo_world.py · scripts/import_azgaar.py
   `ForecastRun` docs on their branch, so briefings survive restarts.
 * Mock mode is a deterministic rule-based model, not an LLM: great for testing the pipeline and UI,
   less inventive than a real model.
+
+## SRD attribution
+
+This work includes material from the System Reference Document 5.2.1 ("SRD 5.2.1") by Wizards of the Coast LLC,
+available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative Commons Attribution 4.0
+International License, available at https://creativecommons.org/licenses/by/4.0/legalcode.
+
+The engine is compatible with fifth edition.
 
 ## License
 
