@@ -64,8 +64,8 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world)
 - **Campaigns** = one TerminusDB database each (`campaign_<slug>_<n>`); the active one is remembered in
   `<data>/active_campaign.txt`; use `graph.store.get_store()` in request code. The Greywater demo is `living_world`.
 - **Writes** go through `store.upsert(docs, branch, message)`; commit messages are prefixed (`[forecast]`,
-  `[vtt]`, `[party]`, `[atlas]`, `[setup]`). Ids are deterministic: `stable_uid(prefix, *parts)` and
-  `builders.doc_id(type, uid)` (`"Location/the-drowned-lantern"`).
+  `[vtt]`, `[party]`, `[atlas]`, `[setup]`). Ids are deterministic: `graph.schema.stable_uid(prefix, *parts)` and
+  `graph.schema.doc_id(type, uid)` (`"Location/the-drowned-lantern"`).
 - **Epistemic rule.** Agents (Characters, Factions) may only reason over `WorldView.known_ids(agent)`: their
   KNOWS/BELIEVES `EpistemicEdge`s plus location, controls, relationships, goals. `agent_context()` is the only
   slice an agent prompt sees. Knowledge spreads via event witnesses and rumors.
