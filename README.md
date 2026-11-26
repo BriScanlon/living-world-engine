@@ -353,17 +353,31 @@ the tavern, two items, a marsh hag, three goal clocks, rumors already circulatin
 ## Running with a real model
 
 Everything works in mock mode; to use a real model, point the engine at any OpenAI-compatible endpoint in `.env`.
-With Ollama on the same machine (natively or in its own container publishing port 11434), the backend container
-reaches it through `host.docker.internal`:
+The tested setup is **Ollama on the Docker host** with an AMD 7900 XT (20 GB):
 
 ```bash
 MOCK_LLM=false
-LLM_BASE_URL=http://host.docker.internal:11434/v1
-LLM_MODEL=qwen2.5:14b-instruct      # any instruct (non-reasoning) model that fits your GPU
+LLM_BASE_URL=http://host.docker.internal:11434/v1   # the backend container reaches the host's Ollama here
+LLM_MODEL=qwen3.8:27b               # or qwen2.5:14b-instruct
+LLM_REASONING_EFFORT=none           # reasoning models: skip the thinking before the JSON (empty for instruct models)
 LLM_JSON_MODE=json_schema           # Ollama constrains decoding to the schema: far fewer invalid replies
-LLM_CONCURRENCY=2                   # one GPU: keep this low
+LLM_MAX_TOKENS=4096                 # a looping model stops here instead of running to the timeout
+LLM_CONCURRENCY=1                   # one GPU
 LLM_TIMEOUT_SECONDS=300
 ```
+
+**Set up Ollama first:**
+
+* **Context length.** Ollama defaults to 4,096 tokens and *silently truncates* longer prompts
+  (`truncating input prompt limit=2050 prompt=4795` in its log). The session-notes prompt with its schema is about
+  4.8K tokens, so set `OLLAMA_CONTEXT_LENGTH` to at least 8192 on the Ollama side (32768 for a 14B model; about
+  16384 is what fits beside a 27B model's weights in 20 GB) and restart Ollama.
+* **VRAM.** `ollama ps` must show `100% GPU`. Another model resident on the same card (a second Ollama, a long
+  keep-alive) pushes the model into shared system memory: under 1 token/s instead of 50 to 64, and large contexts
+  fail to allocate. Windows Task Manager shows dedicated VRAM.
+* **AMD on Windows: run Ollama natively, not in a container.** Under Docker Desktop / WSL2 the GPU is exposed only
+  as `/dev/dxg` (no `/dev/kfd`), so the `ollama/ollama:rocm` image can't use it; the native Windows build (ROCm)
+  detects the card (gfx1100) and the backend container reaches it through `host.docker.internal`.
 
 Then check every model call before running a forecast. `scripts/llm_smoke.py` makes each of the engine's five
 structured calls once on the current campaign (session notes, an NPC's decision, the arbiter, rumors, lore
@@ -375,7 +389,12 @@ docker compose exec backend python /app/scripts/llm_smoke.py                 # a
 docker compose exec backend python /app/scripts/llm_smoke.py json_object agent rumor   # compare a mode, some calls
 ```
 
-A 4B model on CPU is too slow even for this; a GPU with 16 GB or more runs 14B–24B instruct models comfortably.
+In Git Bash on Windows, prefix with `MSYS_NO_PATHCONV=1` or it rewrites `/app/...` into a Windows path. Each attempt
+is logged (`docker compose logs backend`) with its wall time, finish reason and output tokens.
+
+First run, `qwen2.5:14b-instruct` at 32K context (15 GB VRAM, 50 to 64 tokens/s), `json_schema`: session notes,
+agent, arbiter and rumors each validated in 3 to 8 s; lore extraction ran away, copying the KNOWN ENTITIES list
+instead of reading the text (issue #13). A 4B model on CPU was too slow to finish a single call.
 
 ## Development without Docker
 

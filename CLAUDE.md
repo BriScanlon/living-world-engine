@@ -98,17 +98,23 @@ rumors.
 ## LLM
 
 - `llm/client.py`: OpenAI SDK against `LLM_BASE_URL` (Ollama/vLLM/LM Studio/OpenAI). `structured(system, user,
-  PydanticModel)` validates and re-prompts on errors (`LLM_MAX_RETRIES`). `LLM_JSON_MODE`: `json_object` |
-  `json_schema` (use this with Ollama: constrained decoding) | `none`.
+  PydanticModel)` validates against the model. `LLM_MAX_RETRIES` is the only retry policy (SDK `max_retries=0`):
+  invalid JSON is corrected in conversation, a reply cut off at `LLM_MAX_TOKENS` is retried fresh, timeouts/5xx
+  retry, other 4xx raise; every attempt is logged (time, finish reason, tokens). `LLM_JSON_MODE`: `json_object` |
+  `json_schema` (use this with Ollama: constrained decoding) | `none`. `LLM_REASONING_EFFORT` (`none`..`high`) is
+  sent as `reasoning_effort` when set; `none` stops a reasoning model (qwen3.8) thinking before its JSON.
 - Five call sites, each with a mock twin in `llm/mock.py`: session delta, agent intent, arbiter, rumors
   (`simulation/engine.py`), lore extraction (`ingestion/extract.py`). The VTT has its own optional LLM (prompt
   expansion) behind `VTT_MOCK_AI_PIPELINE`.
-- **Status: never yet run end to end on a real model.** `scripts/llm_smoke.py` checks all five calls
-  (`docker compose exec backend python /app/scripts/llm_smoke.py [json_schema|json_object|none] [calls…]`). A 4B
-  model on CPU was too slow; the next attempt is a ROCm Ollama container on a PC with an AMD 7900 XT (20 GB),
-  starting with `qwen2.5:14b-instruct`, `LLM_JSON_MODE=json_schema`, `LLM_CONCURRENCY=2`. A native Anthropic SDK
-  backend was discussed as an alternative but not built (it would be a second client chosen by a setting, not a
-  change to the OpenAI-compatible one).
+- **Status: smoke-tested, not yet through a full forecast.** `scripts/llm_smoke.py` checks all five calls
+  (`docker compose exec backend python /app/scripts/llm_smoke.py [json_schema|json_object|none] [calls…]`). First
+  run on a 7900 XT (20 GB) with native Windows ROCm Ollama, `qwen2.5:14b-instruct`, 32K context, `json_schema`:
+  4/5 pass in 3 to 8 s each; extraction copies the KNOWN ENTITIES list (issue #13). The user has since moved that
+  PC to `qwen3.8:27b` (reasoning model: set `LLM_REASONING_EFFORT=none`; about 16K context fits beside it). A native
+  Anthropic SDK backend was discussed but not built (it would be a second client chosen by a setting).
+- **Ollama setup that matters:** `OLLAMA_CONTEXT_LENGTH` of 8192 or more (the default 4096 silently truncates the
+  ~4.8K session-notes prompt); `ollama ps` must say `100% GPU` (another resident model drops it to <1 tok/s); on
+  Windows + AMD run Ollama natively, since Docker Desktop/WSL2 exposes only `/dev/dxg`, which `ollama:rocm` can't use.
 
 ## Running and testing
 
@@ -142,6 +148,7 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
   cleanup (this broke the paint-polling loop once). Atlas hot reload can leave MapLibre in a "Style is not done
   loading" crash; reload the page.
 - MapLibre GeoJSON sources fetch in a worker: use absolute URLs (`location.origin + …`).
+- Git Bash rewrites `/app/...` in `docker compose exec backend python /app/...`: prefix `MSYS_NO_PATHCONV=1`.
 - The sample planet is coarse (22 huge provinces), so trips take months; Azgaar worlds are finer.
 - `atlas_state(day=None)` means "max day on the branch", so ended facts drop out.
 
@@ -163,8 +170,9 @@ Azgaar import, PMTiles), new-world wizard + SRD 5.2.1, VTT link (map footprints,
 portrait tokens, session log -> forecast, tokens on the table, party fog of war, party overland map on the table,
 travel times (roads, sea, SRD paces) in forecasts and atlas, zoom-in maps of any spot. All six design phases done.
 
-Open: PR #10 (`scripts/llm_smoke.py` + README "Running with a real model"). Next: run it on the GPU PC and fix
-whatever the real model breaks (prompt clarity, schema size, timeouts, concurrency).
+Real-model work is tracked in GitHub issues (#12 max tokens, #13 extraction echoing known entities, #14 SDK
+retries, #15 reasoning effort + qwen3.8 vs qwen2.5 comparison, #16 these docs). Next: a full forecast on the real
+model.
 
 Backlog: real map labels on the globe (needs bundled fonts/glyphs), battle strength from SRD challenge ratings,
 forecast runs surviving a backend restart (registry is in memory), "Open in VTT" from the briefing, LLM-written
