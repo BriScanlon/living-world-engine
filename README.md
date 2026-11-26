@@ -358,7 +358,7 @@ The tested setup is **Ollama on the Docker host** with an AMD 7900 XT (20 GB):
 ```bash
 MOCK_LLM=false
 LLM_BASE_URL=http://host.docker.internal:11434/v1   # the backend container reaches the host's Ollama here
-LLM_MODEL=qwen3.8:27b               # or qwen2.5:14b-instruct
+LLM_MODEL=qwen3.8:27b-16k           # qwen3.8:27b at a 16K context (32K won't fit beside it in 20 GB); or qwen2.5:14b-instruct
 LLM_REASONING_EFFORT=none           # reasoning models: skip the thinking before the JSON (empty for instruct models)
 LLM_JSON_MODE=json_schema           # Ollama constrains decoding to the schema: far fewer invalid replies
 LLM_MAX_TOKENS=4096                 # a looping model stops here instead of running to the timeout

@@ -110,7 +110,8 @@ rumors.
   (`docker compose exec backend python /app/scripts/llm_smoke.py [json_schema|json_object|none] [calls…]`). First
   run on a 7900 XT (20 GB) with native Windows ROCm Ollama, `qwen2.5:14b-instruct`, 32K context, `json_schema`:
   4/5 pass in 3 to 8 s each; extraction copies the KNOWN ENTITIES list (issue #13). The user has since moved that
-  PC to `qwen3.8:27b` (reasoning model: set `LLM_REASONING_EFFORT=none`; about 16K context fits beside it). A native
+  PC to `qwen3.8:27b-16k` (qwen3.8:27b at a 16K context, since 32K won't fit in 20 GB; reasoning model: set
+  `LLM_REASONING_EFFORT=none`). A native
   Anthropic SDK backend was discussed but not built (it would be a second client chosen by a setting).
 - **Ollama setup that matters:** `OLLAMA_CONTEXT_LENGTH` of 8192 or more (the default 4096 silently truncates the
   ~4.8K session-notes prompt); `ollama ps` must say `100% GPU` (another resident model drops it to <1 tok/s); on
