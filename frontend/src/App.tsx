@@ -1,16 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { api, Branch, Health } from "./api";
+import { api, Branch, Campaign, Health } from "./api";
 import { Badge, cx } from "./ui";
 import Branches from "./views/Branches";
 import Briefing from "./views/Briefing";
 import Forecaster from "./views/Forecaster";
 import Ingest from "./views/Ingest";
+import NewWorld from "./views/NewWorld";
 import TimeTravel from "./views/TimeTravel";
 
 // MapLibre is large: load the atlas only when its tab opens
 const Atlas = lazy(() => import("./views/Atlas"));
 
-type View = "forecast" | "briefing" | "atlas" | "branches" | "time" | "ingest";
+type View = "forecast" | "briefing" | "atlas" | "branches" | "time" | "ingest" | "new";
 const NAV: { id: View; label: string }[] = [
   { id: "forecast", label: "Session Forecaster" },
   { id: "briefing", label: "DM Briefing" },
@@ -18,6 +19,7 @@ const NAV: { id: View; label: string }[] = [
   { id: "branches", label: "Branches" },
   { id: "time", label: "Time Travel" },
   { id: "ingest", label: "Ingest" },
+  { id: "new", label: "✦ New World" },
 ];
 
 function initialView(): View {
@@ -30,15 +32,26 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
   const refresh = useCallback(() => {
     api.branches().then(setBranches).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
+  const refreshAll = useCallback(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
+    api.campaigns().then(setCampaigns).catch(() => undefined);
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    refreshAll();
+  }, [refreshAll]);
+
+  const switchCampaign = async (id: string) => {
+    await api.activateCampaign(id);
+    setSelected(null);
+    refreshAll();
+  };
 
   // Poll while any forecast is running so lists stay live.
   useEffect(() => {
@@ -83,6 +96,16 @@ export default function App() {
             ))}
           </nav>
           <div className="flex items-center gap-2 text-xs">
+            {campaigns.length > 0 && health && (
+              <select
+                title="Campaign (each world is its own database)"
+                className="rounded-md border border-ink-600 bg-ink-900 px-2 py-1 text-xs text-ink-100 focus:border-ember-500 focus:outline-none"
+                value={health.campaign}
+                onChange={(e) => switchCampaign(e.target.value)}
+              >
+                {campaigns.map((c) => <option key={c.id} value={c.id}>{c.label === "Living World" ? `Greywater demo${c.id !== health.default_campaign ? ` (${c.id})` : ""}` : c.label}</option>)}
+              </select>
+            )}
             {health ? (
               <>
                 <Badge tone={health.terminusdb.ok ? "green" : "red"} title={health.terminusdb.error}>
@@ -96,7 +119,8 @@ export default function App() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-[1500px] px-5 py-6">
+      {/* remount every view when the campaign changes so nothing shows the previous world */}
+      <main key={health?.campaign ?? "none"} className="mx-auto max-w-[1500px] px-5 py-6">
         {view === "forecast" && <Forecaster health={health} onOpenBriefing={openBriefing} onChanged={refresh} />}
         {view === "briefing" && <Briefing branches={branches} selected={selected} onSelect={setSelected} onChanged={refresh} />}
         {view === "atlas" && (
@@ -107,6 +131,7 @@ export default function App() {
         {view === "branches" && <Branches branches={branches} onChanged={refresh} onOpenBriefing={openBriefing} />}
         {view === "time" && <TimeTravel branches={branches} />}
         {view === "ingest" && <Ingest branches={branches} health={health} onChanged={refresh} />}
+        {view === "new" && <NewWorld onSwitched={() => { refreshAll(); go("atlas"); }} />}
       </main>
     </div>
   );

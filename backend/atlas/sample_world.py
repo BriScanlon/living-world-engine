@@ -52,9 +52,42 @@ def _name(rng: random.Random, culture: int, parts: int | None = None) -> str:
     return "".join(rng.choice(syl) for _ in range(n)).capitalize()
 
 
+# Land shapes (cf. Azgaar's heightmap templates): blob count, blob radius (fraction of width), sea share
+LAND_SHAPES = {
+    "continents": (6, (0.10, 0.22), 0.60),
+    "pangea": (3, (0.20, 0.32), 0.55),
+    "archipelago": (14, (0.04, 0.09), 0.72),
+    "islands": (9, (0.06, 0.12), 0.68),
+    "old-world": (8, (0.08, 0.18), 0.58),
+}
+# Climate bands (cf. Azgaar's Configure World presets) -> map coordinates
+CLIMATES = {
+    "whole-world": {"latT": 140, "latN": 70, "latS": -70},
+    "northern": {"latT": 60, "latN": 70, "latS": 10},
+    "temperate": {"latT": 40, "latN": 60, "latS": 20},
+    "tropical": {"latT": 50, "latN": 25, "latS": -25},
+    "southern": {"latT": 60, "latN": -10, "latS": -70},
+}
+HOSTILITY_POOLS = {
+    "peaceful": (["Friendly", "Ally", "Neutral", "Suspicion", "Friendly", "Rival"], ["Neutral", "Friendly", "Unknown"]),
+    "uneasy": (["Rival", "Rival", "Enemy", "Suspicion", "Friendly", "Ally"], ["Neutral", "Neutral", "Unknown", "Friendly", "Suspicion"]),
+    "warring": (["Enemy", "Enemy", "Rival", "Rival", "Suspicion", "Ally"], ["Suspicion", "Rival", "Neutral", "Unknown"]),
+}
+
+
 def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: float = 12.0,
-             n_states: int = 9, name: str = "Thessaly Reach") -> dict[str, Any]:
+             n_states: int = 9, name: str = "Thessaly Reach", land: str = "continents",
+             climate: str = "whole-world", n_cultures: int = 5, n_religions: int = 4,
+             hostility: str = "uneasy", culture_names: list[str] | None = None,
+             religion_names: list[tuple[str, str]] | None = None) -> dict[str, Any]:
     rng = random.Random(seed)
+    n_blobs, blob_r, sea_share = LAND_SHAPES.get(land, LAND_SHAPES["continents"])
+    culture_list = (culture_names or CULTURE_NAMES)[:max(1, n_cultures)]
+    while len(culture_list) < n_cultures:
+        culture_list = culture_list + [_name(rng, len(culture_list), 2) + "i"]
+    religion_list = (religion_names or RELIGIONS)[:max(1, n_religions)]
+    while len(religion_list) < n_religions:
+        religion_list = religion_list + [(f"Cult of {_name(rng, len(religion_list), 2)}", "Cult")]
 
     # ------------------------------------------------------------------ hex mesh
     w = math.sqrt(3) * radius
@@ -92,8 +125,8 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     n = len(centers)
 
     # ------------------------------------------------------------------ heightmap
-    blobs = [(rng.uniform(0.12, 0.88) * width, rng.uniform(0.25, 0.75) * height,
-              rng.uniform(0.10, 0.22) * width, rng.uniform(0.7, 1.0)) for _ in range(6)]
+    blobs = [(rng.uniform(0.08, 0.92) * width, rng.uniform(0.2, 0.8) * height,
+              rng.uniform(*blob_r) * width, rng.uniform(0.7, 1.0)) for _ in range(n_blobs)]
     grid = [[rng.random() for _ in range(17)] for _ in range(9)]
 
     def noise(x: float, y: float) -> float:
@@ -109,13 +142,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
         v = sum(amp * math.exp(-(((x - bx) ** 2 + (y - by) ** 2) / (rad ** 2))) for bx, by, rad, amp in blobs)
         v += 0.45 * noise(x, y) - 0.1 * abs(y / height - 0.5)
         raw.append(v)
-    thr = sorted(raw)[int(n * 0.6)]
+    thr = sorted(raw)[int(n * sea_share)]
     lo, hi = min(raw), max(raw)
     h = [int(20 + (v - thr) / (hi - thr) * 80) if v >= thr else int(19 * (v - lo) / (thr - lo)) for v in raw]
     land = [x >= 20 for x in h]
 
     # ------------------------------------------------------------------ biomes
-    coords = {"latT": 140, "latN": 70, "latS": -70, "lonT": 300, "lonW": -150, "lonE": 150}
+    coords = {**CLIMATES.get(climate, CLIMATES["whole-world"]), "lonT": 300, "lonW": -150, "lonE": 150}
     moist = [noise(width - x, height - y) for (x, y) in centers]
     biome = []
     for i, (x, y) in enumerate(centers):
@@ -194,13 +227,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
 
     land_cells = [i for i in range(n) if land[i]]
     habitable = [i for i in land_cells if biome[i] not in (10, 11) and sizes.get(feature[i], 0) >= 30]
-    cult_centers = farthest(habitable, len(CULTURE_NAMES))
+    cult_centers = farthest(habitable, len(culture_list))
     culture = grow({c: k + 1 for k, c in enumerate(cult_centers)}, lambda c: land[c], lambda c: 1.0)
     for f in sizes:  # islands unreached by any culture
         pass
     cultures = [{"i": 0, "name": "Wildlands", "base": 0}] + [
         {"i": k + 1, "name": nm, "base": k, "center": cult_centers[k], "color": STATE_COLORS[(k * 3) % 12]}
-        for k, nm in enumerate(CULTURE_NAMES)]
+        for k, nm in enumerate(culture_list)]
 
     # ------------------------------------------------------------------ states
     big = [f for f, s in sizes.items() if s >= 30]
@@ -231,8 +264,8 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     rel = [["x"] * ns for _ in range(ns)]
     for a in range(1, ns):
         for b2 in range(a + 1, ns):
-            pool = (["Rival", "Rival", "Enemy", "Suspicion", "Friendly", "Ally"] if b2 in neighbours[a]
-                    else ["Neutral", "Neutral", "Unknown", "Friendly", "Suspicion"])
+            near, far = HOSTILITY_POOLS.get(hostility, HOSTILITY_POOLS["uneasy"])
+            pool = near if b2 in neighbours[a] else far
             rel[a][b2] = rel[b2][a] = rng.choice(pool)
     for s in states[1:]:
         s["diplomacy"] = rel[s["i"]]
@@ -289,8 +322,8 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
 
     # ------------------------------------------------------------------ religions
     religions = [{"i": 0, "name": "No religion"}] + [
-        {"i": k + 1, "name": nm, "type": tp, "color": STATE_COLORS[(k * 5) % 12]} for k, (nm, tp) in enumerate(RELIGIONS)]
-    religion = [0 if not land[i] else 1 + (culture[i] + state[i]) % len(RELIGIONS) for i in range(n)]
+        {"i": k + 1, "name": nm, "type": tp, "color": STATE_COLORS[(k * 5) % 12]} for k, (nm, tp) in enumerate(religion_list)]
+    religion = [0 if not land[i] else 1 + (culture[i] + state[i]) % len(religion_list) for i in range(n)]
 
     # ------------------------------------------------------------------ routes (roads inside each state)
     def path(a: int, b2: int) -> list[int]:

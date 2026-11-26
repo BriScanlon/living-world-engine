@@ -27,6 +27,12 @@ log = logging.getLogger(__name__)
 
 MAIN = "main"
 AUTHOR = "living-world-engine"
+CAMPAIGN_MARKER = "Living World Engine campaign"
+
+
+def _valid_db_name(name: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"[a-z][a-z0-9_]{1,62}", name or ""))
 
 
 def to_branch_id(name: str) -> str:
@@ -46,11 +52,52 @@ class GraphStore:
 
     _lock = threading.RLock()
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, db: str | None = None) -> None:
         self.s = settings or get_settings()
-        self.db = self.s.terminusdb_db
+        self.db = db or self.s.terminusdb_db
         self.team = self.s.terminusdb_team
         self._base: Client | None = None
+
+    # ------------------------------------------------------------------ campaigns (one database per world)
+    def bound(self) -> "GraphStore":
+        """A store pinned to the current campaign: long jobs keep writing to the database they
+        started on even if the user switches campaigns meanwhile."""
+        return GraphStore(self.s, self.db)
+
+    def use(self, db: str) -> None:
+        if not _valid_db_name(db):
+            raise GraphStoreError(f"Invalid campaign id: {db}")
+        self.db = db
+
+    def list_campaigns(self) -> list[dict[str, Any]]:
+        r = requests.get(self._api("db"), auth=self._http_auth, params={"verbose": "true"}, timeout=10)
+        r.raise_for_status()
+        out = []
+        for d in r.json():
+            path = d.get("path", "")
+            team, _, name = path.partition("/")
+            if team != self.team or name.startswith("lwe_test_"):
+                continue
+            if not str(d.get("comment", "")).startswith(CAMPAIGN_MARKER):
+                continue
+            out.append({"id": name, "label": d.get("label") or name, "description": d.get("comment"),
+                        "active": name == self.db})
+        return sorted(out, key=lambda c: (not c["active"], c["label"].lower()))
+
+    def create_campaign(self, db: str, label: str) -> None:
+        if not _valid_db_name(db):
+            raise GraphStoreError(f"Invalid campaign id: {db}")
+        target = GraphStore(self.s, db)
+        if target.db_exists():
+            raise GraphStoreError(f"Campaign {db} already exists")
+        self._root().create_database(db, team=self.team, label=label[:100],
+                                     description=f"{CAMPAIGN_MARKER} graph: {label}"[:250])
+        target.apply_schema()
+
+    def delete_campaign(self, db: str) -> None:
+        if db == self.s.terminusdb_db:
+            raise GraphStoreError("Refusing to delete the default campaign")
+        self._root().delete_database(db, team=self.team, force=True)
 
     # ------------------------------------------------------------------ clients
     def _root(self) -> Client:
@@ -92,7 +139,7 @@ class GraphStore:
                 root = self._root()
                 root.create_database(
                     self.db, team=self.team, label="Living World",
-                    description="Living World Engine campaign graph",
+                    description=f"{CAMPAIGN_MARKER} graph",
                 )
                 created = True
             self.apply_schema()
@@ -317,8 +364,32 @@ def _schema_eq(a: dict, b: dict) -> bool:
 _store: GraphStore | None = None
 
 
+def _active_file():
+    from pathlib import Path
+    return Path(get_settings().atlas_dir).parent / "active_campaign.txt"
+
+
 def get_store() -> GraphStore:
+    """The process-wide store, pointed at the active campaign (remembered across restarts)."""
     global _store
     if _store is None:
         _store = GraphStore()
+        try:
+            saved = _active_file().read_text(encoding="utf-8").strip()
+            if saved and _valid_db_name(saved) and GraphStore(_store.s, saved).db_exists():
+                _store.db = saved
+        except OSError:
+            pass
     return _store
+
+
+def set_active_campaign(db: str) -> None:
+    store = get_store()
+    if not GraphStore(store.s, db).db_exists():
+        raise GraphStoreError(f"No campaign called {db}")
+    store.use(db)
+    try:
+        _active_file().parent.mkdir(parents=True, exist_ok=True)
+        _active_file().write_text(db, encoding="utf-8")
+    except OSError:
+        log.warning("Could not remember the active campaign on disk")

@@ -2,8 +2,45 @@
 
 export type Doc = Record<string, any> & { "@id": string; "@type": string; name?: string };
 
+export interface Campaign {
+  id: string;
+  label: string;
+  description: string;
+  active: boolean;
+}
+
+export type WizardField = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "select" | "checkbox";
+  options?: Record<string, string>;
+  hint?: string;
+  roll?: string;
+  min?: number;
+  max?: number;
+};
+
+export interface WizardSpec {
+  approaches: Record<string, { label: string; order: string[]; blurb: string }>;
+  focuses: Record<string, { label: string; defaults: WizardAnswers }>;
+  steps: Record<string, { title: string; guide: string; fields: WizardField[] }>;
+  rolls: Record<string, string[]>;
+}
+
+export type WizardAnswers = Record<string, any> & { approach: string; focus: string };
+
+export interface WizardJob {
+  id: string;
+  status: string;
+  events: { seq: number; step: string; kind: string; message: string; data?: any }[];
+  result: { campaign: string; name: string; seed: number; atlas: string; town: string; steps: Record<string, { documents: number; message: string }> } | null;
+  error: string | null;
+}
+
 export interface Health {
   status: string;
+  campaign: string;
+  default_campaign: string;
   terminusdb: { ok: boolean; version?: string; error?: string };
   mock_llm: boolean;
   llm_model: string | null;
@@ -199,7 +236,8 @@ export interface PlaceDetail {
   population: number | null;
   controller: Ref | null;
   province: Ref | null;
-  people: { id: string; name: string; role: string | null }[];
+  people: { id: string; name: string; role: string | null; species?: string | null; char_class?: string | null; srd_ref?: string | null }[];
+  monsters?: { id: string; name: string; challenge: string | null; srd_ref: string | null }[];
   events: { id: string; title: string; day: number; summary: string }[];
   rumors: { dialogue: string; accuracy: string; speaker: string | null }[];
   places: { id: string; name: string; kind: string | null }[];
@@ -279,4 +317,17 @@ export const api = {
   place: (id: string, branch: string, day: number | null) =>
     req<PlaceDetail>(`/atlas/place/${id}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`),
   atlasFile: (slug: string, name: string) => `/api/atlas/files/${slug}/${name}`,
+  campaigns: () => req<Campaign[]>("/campaigns"),
+  activateCampaign: (id: string) => req<{ active: string }>("/campaigns/active", json({ id })),
+  deleteCampaign: (id: string) => req<any>(`/campaigns/${enc(id)}`, { method: "DELETE" }),
+  wizardSpec: () => req<WizardSpec>("/wizard/spec"),
+  wizardBuild: (answers: WizardAnswers) => req<WizardJob>("/wizard/build", json(answers)),
+  wizardJob: (id: string) => req<WizardJob>(`/wizard/jobs/${id}`),
+  wizardUpload: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return req<{ upload_id: string; name: string; states: number }>("/wizard/upload", { method: "POST", body: fd });
+  },
+  srdEntry: (id: string) => req<any>(`/srd/entry/${id}`),
+  srdInfo: () => req<{ attribution: string; license: string; counts: Record<string, number> }>("/srd"),
 };

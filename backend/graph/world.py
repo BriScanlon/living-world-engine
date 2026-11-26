@@ -131,7 +131,8 @@ class WorldView:
 
     # ------------------------------------------------------------------ agent views
     def agents(self) -> list[dict[str, Any]]:
-        return [d for d in self.of_type(*AGENT_TYPES) if not d.get("is_party") and d.get("kind") != "pc"]
+        return [d for d in self.of_type(*AGENT_TYPES)
+                if not d.get("is_party") and d.get("kind") not in ("pc", "deity")]
 
     def desires_of(self, agent_id: str) -> list[dict[str, Any]]:
         return sorted((e for e in self.of_type("DesireEdge") if e["from_id"] == agent_id),

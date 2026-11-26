@@ -29,6 +29,9 @@ def _bootstrap() -> None:
             log.info("Waiting for TerminusDB at %s (%s)…", settings.terminusdb_url, attempt + 1)
             time.sleep(2)
     created = store.ensure_database()
+    if store.db != settings.terminusdb_db:  # a wizard-made campaign: only keep its schema current
+        log.info("Active campaign: %s", store.db)
+        return
     if settings.seed_on_startup and (created or not store.all_documents("main", doc_type="Character")):
         result = seed(store)
         log.info("Seeded demo world: %s documents", result["documents"])

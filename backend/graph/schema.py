@@ -96,6 +96,12 @@ SCHEMA: list[dict[str, Any]] = [
         "location": _opt("Location"),
         "faction": _opt("Faction"),
         "personality": _opt("xsd:string"),
+        # SRD 5.2.1-backed details (see backend/srd)
+        "species": _opt("xsd:string"),
+        "char_class": _opt("xsd:string"),
+        "background": _opt("xsd:string"),
+        "level": _opt("xsd:integer"),
+        "srd_ref": _opt("xsd:string"),
     },
     {
         "@type": "Class",
@@ -143,6 +149,8 @@ SCHEMA: list[dict[str, Any]] = [
         "item_type": _opt("xsd:string"),
         "value": _opt("xsd:integer"),
         "location": _opt("Location"),
+        "rarity": _opt("xsd:string"),
+        "srd_ref": _opt("xsd:string"),
     },
     {
         "@type": "Class",
@@ -151,6 +159,9 @@ SCHEMA: list[dict[str, Any]] = [
         "@key": _LEX_UID,
         "threat": _opt("xsd:integer"),
         "location": _opt("Location"),
+        "challenge": _opt("xsd:string"),  # SRD challenge rating, e.g. "1/4", "17"
+        "srd_ref": _opt("xsd:string"),
+        "count": _opt("xsd:integer"),
     },
     {
         "@type": "Class",
@@ -290,7 +301,7 @@ SCHEMA: list[dict[str, Any]] = [
 INT_FIELDS = {
     "in_world_start", "in_world_end", "resources", "influence", "value", "threat",
     "clock_segments", "clock_progress", "ticks_every_days", "trust_score",
-    "session_number", "start_day", "end_day", "population", "area_cells",
+    "session_number", "start_day", "end_day", "population", "area_cells", "level", "count",
 }
 # Set-valued fields that TerminusDB omits when empty.
 SET_FIELDS = {"aliases", "tags", "actors", "targets"}
