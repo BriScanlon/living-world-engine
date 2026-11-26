@@ -350,6 +350,33 @@ the tavern, two items, a marsh hag, three goal clocks, rumors already circulatin
 
 ---
 
+## Running with a real model
+
+Everything works in mock mode; to use a real model, point the engine at any OpenAI-compatible endpoint in `.env`.
+With Ollama on the same machine (natively or in its own container publishing port 11434), the backend container
+reaches it through `host.docker.internal`:
+
+```bash
+MOCK_LLM=false
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_MODEL=qwen2.5:14b-instruct      # any instruct (non-reasoning) model that fits your GPU
+LLM_JSON_MODE=json_schema           # Ollama constrains decoding to the schema: far fewer invalid replies
+LLM_CONCURRENCY=2                   # one GPU: keep this low
+LLM_TIMEOUT_SECONDS=300
+```
+
+Then check every model call before running a forecast. `scripts/llm_smoke.py` makes each of the engine's five
+structured calls once on the current campaign (session notes, an NPC's decision, the arbiter, rumors, lore
+extraction), read-only, and reports whether each reply validated and how long it took:
+
+```bash
+docker compose up -d --build backend
+docker compose exec backend python /app/scripts/llm_smoke.py                 # all five, JSON mode from .env
+docker compose exec backend python /app/scripts/llm_smoke.py json_object agent rumor   # compare a mode, some calls
+```
+
+A 4B model on CPU is too slow even for this; a GPU with 16 GB or more runs 14B–24B instruct models comfortably.
+
 ## Development without Docker
 
 ```bash
