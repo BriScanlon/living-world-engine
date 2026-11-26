@@ -32,6 +32,16 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const [branch, setBranch] = useState("main");
   const [compare, setCompare] = useState(true);
   const [view, setView] = useState<AtlasView>("dm");
+  const [tableNote, setTableNote] = useState<string | null>(null);
+  const [tableBusy, setTableBusy] = useState(false);
+  const partyToTable = async () => {
+    setTableBusy(true); setTableNote(null); setError(null);
+    try {
+      const r = await api.partyMapToTable({ branch, day });
+      setTableNote(`On the table: ${r.title}. It redraws itself when you mark what the party learns.`);
+    } catch (e) { setError((e as Error).message); }
+    finally { setTableBusy(false); }
+  };
   const [day, setDay] = useState<number | null>(null);
   const [state, setState] = useState<AtlasState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -325,6 +335,15 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
                 </button>
               ))}
             </div>
+            {view === "party" && (
+              <>
+                <Button variant="primary" disabled={tableBusy || !state?.party?.name} onClick={partyToTable}
+                  title="Draw this view as an overland map and show it on the players' table">
+                  {tableBusy ? <Spinner /> : "▶"} Party map on the table
+                </Button>
+                <a className="text-xs text-ember-300 hover:underline" href={api.partyMapUrl(branch, day)} target="_blank" rel="noreferrer">preview</a>
+              </>
+            )}
             {view === "dm" && (
               <>
                 <label className="flex items-center gap-1.5" title="Highlight what differs from canon">
@@ -341,6 +360,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
           </div>
         </div>
         <div className="mt-2"><ErrorBox error={error} /></div>
+        {tableNote && view === "party" && <p className="mt-1 text-xs text-emerald-300">{tableNote}</p>}
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(300px,1fr)]">

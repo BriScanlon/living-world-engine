@@ -110,3 +110,21 @@ def tokens() -> list[dict[str, Any]]:
 
 def session_log() -> list[dict[str, Any]]:
     return _call("GET", "/api/session-log")["entries"]
+
+
+def upload_map(data: bytes, filename: str, *, title: str, tags: list[str] | None = None,
+               push: bool = False) -> dict[str, Any]:
+    """Add a finished image to the VTT library as-is (no AI), optionally putting it on the table."""
+    out = _call("POST", "/api/upload", data={"mode": "display", "push": str(push).lower(), "title": title[:80],
+                                            "tags": ",".join(tags or [])},
+                files={"file": (filename, data, "application/octet-stream")})
+    return out["asset"]
+
+
+def delete_map(map_id: str) -> None:
+    _call("DELETE", f"/api/maps/{map_id}")
+
+
+def table_state() -> dict[str, Any]:
+    """What is on the table now (the map, its view, grid...). Never includes DM-only scene data."""
+    return _call("GET", "/api/state")

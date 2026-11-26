@@ -116,3 +116,51 @@ def test_sending_a_scene_to_the_table_marks_the_place_visited(world, monkeypatch
     assert out["visited"] is True
     assert party.view(_w(world, 14)).places["Location/vane-manor"] == party.VISITED
     assert to_table(world, "Location/vane-manor", day=14)["visited"] is False  # already been
+
+
+def test_party_map_renders_what_the_party_knows(world):
+    import io
+
+    from PIL import Image
+
+    from atlas.party_map import render
+    data, meta = render(world, day=14)
+    img = Image.open(io.BytesIO(data))
+    assert img.format == "WEBP" and img.size == (2560, 1440)
+    assert meta["party"] == "The Lantern Company" and meta["provinces"]["visited"] >= 1
+    assert meta["places"]["visited"] >= 2 and meta["where"]
+    # fog: the corners of the map (far from anything known) are near-black, the party's town is not
+    px = img.convert("RGB")
+    assert max(px.getpixel((5, 5))) < 50
+
+
+def test_party_map_on_the_table_replaces_the_old_one_and_redraws_itself(world, monkeypatch):
+    from atlas import party_map
+    from vtt_link import client
+
+    library, deleted, table = [{"id": "old", "tags": [f"lwe-overland:{world.db}"]},
+                               {"id": "other-world", "tags": ["lwe-overland:someone_else"]}], [], {}
+
+    made = iter(range(100))
+
+    def upload_map(data, filename, *, title, tags=None, push=False):
+        asset = {"id": f"new{next(made)}", "title": title, "tags": tags}
+        library.append(asset)
+        if push:
+            table["map"] = asset
+        return asset
+
+    monkeypatch.setattr(client, "upload_map", upload_map)
+    monkeypatch.setattr(client, "maps", lambda: list(library))
+    monkeypatch.setattr(client, "delete_map", lambda i: (deleted.append(i), library.remove(next(m for m in library if m["id"] == i))))
+    monkeypatch.setattr(client, "table_state", lambda: dict(table))
+    monkeypatch.setattr(client, "configured", lambda: True)
+
+    out = party_map.to_table(world, day=14)
+    assert out["replaced"] == 1 and deleted == ["old"]  # this world's old map goes, another world's stays
+    assert table["map"]["id"] == out["vtt_map_id"]
+
+    assert party_map.refresh_if_shown(world, day=14)  # the party map is up: redraw
+    assert len([m for m in library if f"lwe-overland:{world.db}" in m["tags"]]) == 1
+    table["map"] = {"id": "battle", "tags": []}
+    assert not party_map.refresh_if_shown(world, day=14)  # a battle map is up: leave it

@@ -236,6 +236,11 @@ only what they know, on that branch and day.
 * In the DM view each place has **Party knowledge: Been there / Heard of / Unknown**. Marks are bi-temporal
   EpistemicEdges from the slider's day, so earlier days keep their fog. *Send scene to the VTT* marks the place
   visited (the table is where the party is).
+* **Party map on the table** (`backend/atlas/party_map.py`): in Party view, *▶ Party map on the table* draws the
+  party's view as an overland map (parchment, rivers, roads, soft fog over land and sea, names of what they know, a
+  "you are here" ring) and shows it on the players' table, fitted to the screen with the battle grid hidden. While
+  it is up, every *Party knowledge* mark redraws it; older party maps of the same world are removed from the VTT
+  library. *preview* opens the image.
 
 ### 9. Virtual tabletop (`vtt/`)
 
@@ -288,6 +293,7 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/world/agent/{id}?branch=&day=` | an agent's epistemic context |
 | GET | `/api/atlas?branch=&day=&compare=&view=dm\|party` | live map state: territory, places, events, rumors (party view: fog of war) |
 | POST | `/api/party/knowledge` | `{place, state: visited\|heard\|unknown, branch, day}`: what the party knows of a place |
+| GET · POST | `/api/party/map.webp?branch=&day=` · `/api/party/map-to-table` | the party's overland map · show it on the table |
 | GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |
 | POST | `/api/atlas/import` | import an Azgaar Full JSON export |
 | GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
@@ -347,7 +353,7 @@ Layout:
 backend/
   graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
   atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
-                party.py (party view: what the party knows, DM marks)
+                party.py (party view: what the party knows, DM marks) · party_map.py (the party's overland map)
   wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
   srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
                 builders.py · briefing.py (4-part diff) · seed.py

@@ -167,6 +167,7 @@ The world engine drives the VTT over its REST API (server to server; the VTT nev
 | POST | `/api/tokens` | `{name, description, tags}`: paint a round portrait token |
 | GET | `/api/jobs/{id}` | one job's progress and result |
 | GET · POST · DELETE | `/api/session-log` (`DELETE /api/session-log/{id}` for one entry) | the session log |
+| POST | `/api/upload` | also takes `tags` (comma-separated); maps tagged `lwe-overland:…` open fitted to the screen with no battle grid |
 | GET · POST · DELETE | `/api/table/tokens` | tokens on the current map: list (hidden ones too), place `{asset_id?, name?, x?, y?, size?, hidden?}`, clear |
 
 The **Session Log** panel on `/dm` records every map pushed and scene opened automatically; type notes as play goes.

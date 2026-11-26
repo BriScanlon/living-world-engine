@@ -257,3 +257,15 @@ def test_tokens_per_map_and_hidden_ones_never_reach_the_table():
         client.delete(f"/api/maps/{face['id']}")
         t = client.get("/api/table/tokens").json()["tokens"][0]
         assert t["img"] is None and t["asset_id"] is None and t["name"] == "Sela Marrow"
+
+
+def test_uploads_keep_tags_and_overland_maps_fit_the_screen():
+    with TestClient(app) as client:
+        r = client.post("/api/upload", files={"file": ("party-map.png", _png_bytes((640, 360)), "image/png")},
+                        data={"mode": "display", "push": "true", "title": "The Company's map, day 10",
+                              "tags": "lwe-overland:living_world, lwe-day:10"}).json()
+        a = r["asset"]
+        assert a["tags"] == ["lwe-overland:living_world", "lwe-day:10"] and a["title"] == "The Company's map, day 10"
+        assert client.get("/api/state").json()["view"]["mode"] == "contain"  # the whole region, not a crop
+        plain = client.post("/api/upload", files={"file": ("x.png", _png_bytes(), "image/png")}).json()["asset"]
+        assert plain["tags"] == [] and client.get(f"/api/maps/{plain['id']}/view").json()["mode"] == "cover"

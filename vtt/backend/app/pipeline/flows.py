@@ -307,7 +307,8 @@ async def animate_image(
     return asset
 
 
-def import_static(db: Database, *, file_path: Path, title: str | None = None, source: str = "imported") -> dict[str, Any]:
+def import_static(db: Database, *, file_path: Path, title: str | None = None, source: str = "imported",
+                  tags: list[str] | None = None) -> dict[str, Any]:
     """Register an uploaded image or video as-is (no AI)."""
     asset_id = new_id()
     dest = settings.maps_dir / f"{asset_id}{file_path.suffix.lower()}"
@@ -315,7 +316,7 @@ def import_static(db: Database, *, file_path: Path, title: str | None = None, so
     is_video = dest.suffix.lower() in VIDEO_EXTS
     return register_asset(
         db, asset_id=asset_id, still=None if is_video else dest, media_file=dest,
-        title=title or nice_title(file_path.stem), source=source,
+        title=title or nice_title(file_path.stem), source=source, tags=tags,
     )
 
 

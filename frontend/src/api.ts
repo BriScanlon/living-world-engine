@@ -357,7 +357,12 @@ export const api = {
   place: (id: string, branch: string, day: number | null, view: AtlasView = "dm") =>
     req<PlaceDetail>(`/atlas/place/${id}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}&view=${view}`),
   markParty: (body: { place: string; state: "visited" | "heard" | "unknown"; branch: string; day: number | null }) =>
-    req<{ place: string; state: string; day: number; changed: boolean }>("/party/knowledge", json(body)),
+    req<{ place: string; state: string; day: number; changed: boolean; table_refreshed: boolean }>("/party/knowledge", json(body)),
+  partyMapUrl: (branch: string, day: number | null) =>
+    `/api/party/map.webp?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}&t=${Date.now()}`,
+  partyMapToTable: (body: { branch: string; day: number | null }) =>
+    req<{ title: string; vtt_map_id: string; replaced: number; places: { visited: number; heard: number } }>(
+      "/party/map-to-table", json(body)),
   atlasFile: (slug: string, name: string) => `/api/atlas/files/${slug}/${name}`,
   campaigns: () => req<Campaign[]>("/campaigns"),
   activateCampaign: (id: string) => req<{ active: string }>("/campaigns/active", json({ id })),
