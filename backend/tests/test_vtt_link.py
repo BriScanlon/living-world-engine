@@ -26,6 +26,35 @@ class FakeVTT:
         json.dumps(scene)  # must be serialisable to cross the wire
         self.scenes.append(scene)
 
+    # phase 5: painting, tokens and the session log
+    jobs: dict
+    token_assets: list
+    log: list
+
+    def generate_map(self, description, *, title=None, tags=None, style="", animate=False):
+        jid = f"job-{len(self.jobs)}"
+        self.jobs[jid] = {"id": jid, "kind": "generate", "status": "running", "progress": 0.4,
+                          "input": {"description": description, "title": title, "tags": tags or []},
+                          "result_asset_id": None}
+        return self.jobs[jid]
+
+    def make_token(self, name, description, tags=None):
+        jid = f"job-{len(self.jobs)}"
+        self.jobs[jid] = {"id": jid, "kind": "token", "status": "queued", "input": {"name": name, "description": description,
+                                                                                     "tags": tags or []}}
+        self.token_assets.append({"id": f"tok-{jid}", "title": name, "tags": tags or [], "created_at": len(self.jobs),
+                                  "thumb_url": f"/media/thumbs/tok-{jid}.webp"})
+        return self.jobs[jid]
+
+    def job(self, job_id):
+        return self.jobs[job_id]
+
+    def tokens(self):
+        return list(self.token_assets)
+
+    def session_log(self):
+        return list(self.log)
+
 
 @pytest.fixture(scope="module")
 def world(tmp_path_factory):
@@ -58,7 +87,9 @@ def world(tmp_path_factory):
 def vtt(monkeypatch):
     from vtt_link import client
     fake = FakeVTT()
-    for name in ("get_map", "map_view", "push_map", "send_scene"):
+    fake.jobs, fake.token_assets, fake.log = {}, [], []
+    for name in ("get_map", "map_view", "push_map", "send_scene", "generate_map", "make_token", "job", "tokens",
+                 "session_log"):
         monkeypatch.setattr(client, name, getattr(fake, name))
     return fake
 
@@ -95,3 +126,66 @@ def test_scene_without_a_map_still_reaches_the_dm(world, vtt):
     out = to_table(world, "Location/vane-manor", day=20)
     assert out["map"] is None and not vtt.pushed
     assert vtt.scenes[-1]["people"][0]["name"] == "Lord Aldric Vane"
+
+
+def test_map_brief_reflects_the_world_on_that_day(world, vtt):
+    from graph import builders as b
+    from vtt_link.session import map_brief
+
+    place = "Location/the-drowned-lantern"
+    world.upsert([b.event("Fire in the cellar", "A fire gutted the Drowned Lantern's cellar", day=21,
+                          event_type="npc_action", location=place),
+                  b.event("Hidden stash", "Smugglers hid crates under the floor", day=21, event_type="npc_action",
+                          location=place, visibility="secret")], "main", "test events")
+    before, after = map_brief(world, place, day=20), map_brief(world, place, day=22)
+    assert "fire" not in before["description"].lower()
+    assert "A fire gutted the Drowned Lantern's cellar" in after["description"]
+    assert "Smugglers" not in after["description"]  # secrets never reach the players' table
+    assert after["title"] == "The Drowned Lantern, day 22" and len(after["description"]) <= 600
+    assert after["tags"] == [f"lwe:{place}", "lwe-day:22", "lwe-branch:main"]
+
+
+def test_painted_map_links_from_its_day_once(world, vtt):
+    from vtt_link.scene import maps_for
+    from vtt_link.session import collect, paint_map
+
+    place = "Location/the-drowned-lantern"
+    out = paint_map(world, place, day=22)
+    assert collect(world, out["job"])["linked"] is None  # still painting
+    vtt.jobs[out["job"]].update(status="done", result_asset_id="map-burned")
+    first = collect(world, out["job"])
+    assert first["linked"]["day"] == 22
+    again = collect(world, out["job"])
+    assert again["linked"]["map"] == first["linked"]["map"]  # polling twice doesn't link twice
+    assert [m["vtt_map_id"] for m in maps_for(world, place, day=21)] == ["map-b"]  # the old map still holds before
+    assert [m["vtt_map_id"] for m in maps_for(world, place, day=22)] == ["map-burned"]
+
+
+def test_tokens_once_per_person_and_portraits_in_the_scene(world, vtt):
+    from vtt_link.scene import to_table
+    from vtt_link.session import paint_tokens
+
+    place = "Location/the-drowned-lantern"
+    first = paint_tokens(world, place, day=22)
+    assert any(q["name"] == "Wenna Tull" for q in first["queued"])
+    assert "Wenna Tull" in paint_tokens(world, place, day=22)["already"]
+    to_table(world, place, day=22)
+    wenna = next(p for p in vtt.scenes[-1]["people"] if p["name"] == "Wenna Tull")
+    assert wenna["portrait"].startswith("/media/thumbs/tok-")
+
+
+def test_session_log_becomes_the_next_forecast_summary(vtt):
+    from vtt_link.session import from_table
+
+    assert from_table()["summary"] == ""
+    vtt.log.extend([
+        {"id": 1, "kind": "map", "text": "Map on the table: Docks", "meta": {}},
+        {"id": 2, "kind": "scene", "text": "Scene: The Docks (day 14)", "meta": {"day": 14}},
+        {"id": 3, "kind": "note", "text": "The party torched the Guild warehouse.", "meta": {}},
+        {"id": 4, "kind": "scene", "text": "Scene: Vane Manor (day 15, forecast--x)", "meta": {"day": 15}},
+    ])
+    out = from_table()
+    assert out["summary"].splitlines()[1:] == ["- The party went to The Docks.",
+                                               "- The party torched the Guild warehouse.",
+                                               "- The party went to Vane Manor."]
+    assert (out["start_day"], out["end_day"], out["notes"]) == (14, 15, 1)

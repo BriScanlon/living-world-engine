@@ -155,6 +155,25 @@ Model files and node IDs are documented in [`workflows/README.md`](workflows/REA
 
 ---
 
+## World link
+
+The world engine drives the VTT over its REST API (server to server; the VTT never calls back):
+
+| Method | Path | |
+|---|---|---|
+| GET | `/api/maps/{id}/view` | how a map sits on the table, with `metresPerPx`, so the atlas can place it at true scale |
+| GET · POST · DELETE | `/api/scene` | the DM-only *World* panel: who is at the place on the table, tensions, rumors, SRD stats |
+| POST | `/api/generate` | also takes `title` and `tags` (e.g. `lwe:Location/the-docks`), so the engine can find its paint jobs |
+| POST | `/api/tokens` | `{name, description, tags}`: paint a round portrait token |
+| GET | `/api/jobs/{id}` | one job's progress and result |
+| GET · POST · DELETE | `/api/session-log` (`DELETE /api/session-log/{id}` for one entry) | the session log |
+
+The **Session Log** panel on `/dm` records every map pushed and scene opened automatically; type notes as play goes.
+*New session* clears it, so pull it into the world engine's Session Forecaster (*From the table*) first.
+Scenes and the log are only ever sent to `dm` sockets.
+
+---
+
 ## Starter asset pack
 
 `scripts/seed_starter_assets.py` reads [`scripts/starter_manifest.json`](scripts/starter_manifest.json)
@@ -212,7 +231,7 @@ backend/
     main.py        FastAPI app: REST, /ws, /media, SPA
     state.py       live table state, per-map fog of war, settings persistence
     hub.py         WebSocket fan-out (table / dm roles)
-    db.py          SQLite: assets, settings, jobs, fog
+    db.py          SQLite: assets, settings, jobs, fog, session log
     watcher.py     watchdog inbox watcher
     media.py       thumbnails + procedural mock maps/tokens
     pipeline/
@@ -223,7 +242,7 @@ backend/
   tests/
 frontend/src/
   table/           /table page + calibration ruler
-  dm/              /dm panels (fog editor, controls, generator, importer, jobs, library)
+  dm/              /dm panels (fog editor, controls, generator, importer, jobs, library, world, session log)
   components/      shared canvas layers (map media, FX, grid, fog)
   lib/             hex math, fog store/renderer, FX engine, WebSocket sync
 workflows/         ComfyUI API workflows (Flux, Wan 2.1 FLF2V) with documented node IDs
@@ -232,7 +251,7 @@ scripts/           starter pack seeder + manifest
 
 ### WebSocket protocol (`/ws?role=table|dm`)
 
-- **Server → client:** `state` (full snapshot on connect), `state_part {key, value}`, `fog_op`, `fog_full`, `fog_meta`, `job`, `jobs`, `asset_added`, `library_changed`, `toast`
+- **Server → client:** `state` (full snapshot on connect), `state_part {key, value}`, `fog_op`, `fog_full`, `fog_meta`, `job`, `jobs`, `asset_added`, `library_changed`, `toast`; DM only: `scene`, `log_full {entries}`, `log_entry {entry}`
 - **Table → server:** `viewport {w, h, dpr}`, which drives DM preview geometry and brush sizes in inches
 - **DM → server:** `grid` / `display` / `fx` / `view` `{patch}`, `calibration {patch | nudge}`, `fog_op`, `fog_reset {base}`, `fog_enabled`, `fog_undo {count}`
 

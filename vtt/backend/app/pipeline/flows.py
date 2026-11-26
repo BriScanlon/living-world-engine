@@ -328,6 +328,7 @@ async def generate_token(
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
     out_dir = out_dir or (settings.starter_dir / "tokens")
+    out_dir.mkdir(parents=True, exist_ok=True)
     asset_id = new_id()
     seed = seed if seed is not None else random.randint(1, 2**31 - 1)
     out = out_dir / f"{asset_id}.png"

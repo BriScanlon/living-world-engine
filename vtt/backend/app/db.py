@@ -60,6 +60,15 @@ CREATE TABLE IF NOT EXISTS fog (
     value  TEXT NOT NULL
 );
 
+-- what happened at the table, in order: DM notes plus maps shown and world scenes visited
+CREATE TABLE IF NOT EXISTS session_log (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    at    REAL NOT NULL,
+    kind  TEXT NOT NULL,               -- note | map | scene
+    text  TEXT NOT NULL,
+    meta  TEXT NOT NULL DEFAULT '{}'
+);
+
 -- per-map placement on the table: fill / fit / true scale, px per 5 ft square, pan centre
 CREATE TABLE IF NOT EXISTS map_view (
     map_id TEXT PRIMARY KEY,
@@ -193,6 +202,14 @@ class Database:
             out.append(d)
         return out
 
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        if not row:
+            return None
+        d = dict(row)
+        d["input"] = json.loads(d["input"] or "{}")
+        return d
+
     def fail_stale_jobs(self) -> None:
         """Jobs left running by a previous process can never finish."""
         self._exec(
@@ -200,6 +217,28 @@ class Database:
             "WHERE status IN ('queued', 'running')",
             (time.time(),),
         )
+
+    # ----------------------------------------------------------- session log
+    def add_log(self, kind: str, text: str, meta: dict | None = None) -> dict[str, Any]:
+        at = time.time()
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO session_log (at, kind, text, meta) VALUES (?, ?, ?, ?)",
+                (at, kind, text, json.dumps(meta or {})),
+            )
+            self._conn.commit()
+            new_id = cur.lastrowid
+        return {"id": new_id, "at": at, "kind": kind, "text": text, "meta": meta or {}}
+
+    def list_log(self, limit: int = 1000) -> list[dict[str, Any]]:
+        rows = self._all("SELECT * FROM session_log ORDER BY id DESC LIMIT ?", (limit,))
+        return [{**dict(r), "meta": json.loads(r["meta"] or "{}")} for r in reversed(rows)]
+
+    def delete_log(self, entry_id: int) -> None:
+        self._exec("DELETE FROM session_log WHERE id = ?", (entry_id,))
+
+    def clear_log(self) -> None:
+        self._exec("DELETE FROM session_log")
 
 
 def _asset_row(row: sqlite3.Row) -> dict[str, Any]:

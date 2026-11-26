@@ -8,6 +8,7 @@ import { Importer } from './Importer'
 import { Jobs } from './Jobs'
 import { Library } from './Library'
 import { WorldPanel } from './WorldPanel'
+import { SessionLog } from './SessionLog'
 import { useNaturalSize } from '../lib/mapView'
 import { CalibrationControls, DisplayControls, FxControls, GridControls, MapScaleControls } from './TableControls'
 import { ArrangeProvider, ZoneView } from './Arrange'
@@ -88,6 +89,8 @@ export function DmPage() {
         return <Importer toast={toast} watchInbox={config?.watchInbox ?? true} />
       case 'world':
         return <WorldPanel scene={sync.scene} />
+      case 'sessionLog':
+        return <SessionLog entries={sync.log} toast={toast} />
     }
   }
 

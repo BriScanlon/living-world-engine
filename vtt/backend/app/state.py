@@ -178,6 +178,19 @@ class TableService:
         self.scene = scene
         self.db.set_setting("scene", scene)
         await self.hub.broadcast({"type": "scene", "scene": scene}, role="dm")
+        if scene:
+            place = scene.get("place") or {}
+            where = f"day {scene['day']}" if scene.get("day") is not None else ""
+            if scene.get("branch") and scene["branch"] != "main":
+                where += f", {scene['branch']}"
+            await self.log("scene", f"Scene: {place.get('name')}" + (f" ({where})" if where else ""),
+                           {"place_id": place.get("id"), "day": scene.get("day"), "branch": scene.get("branch")})
+
+    # ------------------------------------------------------------ session log
+    async def log(self, kind: str, text: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        entry = self.db.add_log(kind, text, meta)
+        await self.hub.broadcast({"type": "log_entry", "entry": entry}, role="dm")
+        return entry
 
     def view_for(self, asset: dict[str, Any]) -> dict[str, Any]:
         """A map's saved placement (true-scale pxPerSquare etc.), or its default."""
@@ -264,6 +277,8 @@ class TableService:
         await self.set_part("view")
         await self.set_part("map")
         await self.hub.broadcast({"type": "fog_full", "fog": self.state["fog"]})
+        if asset:
+            await self.log("map", f"Map on the table: {asset.get('title')}", {"map_id": asset["id"]})
 
     async def asset_deleted(self, asset_id: str) -> None:
         if self.state.get("map") and self.state["map"]["id"] == asset_id:

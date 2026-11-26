@@ -141,6 +141,24 @@ export default function Forecaster({ health, onOpenBriefing, onChanged }: {
                   onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])}
                 />
               </label>
+              <button
+                className="text-xs text-ember-300 hover:text-ember-400"
+                title="Pull the VTT's session log (DM notes and places visited) into this summary"
+                onClick={async () => {
+                  setError(null);
+                  try {
+                    const log = await api.tableLog();
+                    if (!log.summary) { setError("The VTT's session log is empty."); return; }
+                    setSummary((s) => (s.trim() ? `${s.trim()}\n\n${log.summary}` : log.summary));
+                    if (log.start_day !== null) setStartDay(log.start_day);
+                    if (log.end_day !== null) setEndDay(Math.max(log.end_day, log.start_day ?? log.end_day));
+                  } catch (e) {
+                    setError(`Couldn't read the table's log: ${(e as Error).message}`);
+                  }
+                }}
+              >
+                From the table
+              </button>
               {demo && (
                 <button className="text-xs text-ember-300 hover:text-ember-400" onClick={() => setSummary(demo)}>
                   Use demo summary

@@ -50,7 +50,10 @@ On first start the backend creates the `living_world` database, applies the sche
    worlds from the campaign menu in the header.
 7. **On the table** → open the VTT's DM screen, generate or import a battle map, then in the atlas open a place,
    link the map under *On the table* and press **Send scene to the VTT**: the map goes on the table and the DM screen's
-   **World** panel shows who is there, tensions, rumors and SRD stat lines.
+   **World** panel shows who is there, tensions, rumors and SRD stat lines. **✦ Paint it as it is** has the VTT
+   paint the place as it stands on that day; **Portraits** paints a token for everyone there.
+8. **After play** → the VTT's **Session Log** has your notes plus the places you visited; in the Session Forecaster
+   press **From the table** to pull it into the next forecast's summary.
 
 Ports already in use? Override `FRONTEND_PORT`, `BACKEND_PORT`, `TERMINUSDB_PORT` in `.env`.
 
@@ -235,6 +238,14 @@ link off). The link is push-only, so the VTT never needs to know about TerminusD
   scene to the DM screen for the chosen branch and day: holder, province and realm; who is there with what they want
   and fear; tensions; rumors to read aloud; creatures and NPC stat lines from the SRD; recent non-secret events; and
   plans in motion. Players never receive it.
+* **Maps follow the world.** *Paint it as it is* builds a map brief from world state on that branch and day (what
+  the place is, who holds it, what has happened there lately; secret events are left out because the map goes on
+  the players' table). You can edit the brief before the VTT paints it, and the finished map is linked from that day,
+  so the map of a burned warehouse replaces the old one only from the day it burned.
+* **Portrait tokens.** *Portraits* asks the VTT for a round top-down token for each person at the place who hasn't
+  got one (tagged with their character id); the World panel shows them next to each name.
+* **The session loop.** The VTT keeps a session log: DM notes typed during play, plus every map shown and scene
+  opened. *From the table* in the Session Forecaster turns it into the summary and sets the session's days.
 
 **Merging.** If `main` hasn't moved since the fork, merge is a fast-forward rebase. Otherwise the
 fork-point→forecast patch is applied with TerminusDB's `apply`; if that conflicts (e.g. you
@@ -269,6 +280,10 @@ Interactive docs at `/docs`. Highlights:
 | GET · POST | `/api/places/{id}/maps` | maps linked to a place · link one `{vtt_map_id, day, branch, kind, rotation_deg}` |
 | DELETE | `/api/maps/{id}` | unlink (ends the map on that day) |
 | GET · POST | `/api/places/{id}/scene` · `/api/places/{id}/to-table` | preview the DM scene · push map + scene to the VTT |
+| GET · POST | `/api/places/{id}/map-brief` · `/api/places/{id}/paint-map` | map brief from world state · have the VTT paint it |
+| GET | `/api/vtt/jobs/{job}/collect` | paint progress; links the finished map from its day |
+| POST | `/api/places/{id}/tokens` | portrait tokens for the people at a place |
+| GET | `/api/vtt/session-log` | the table's session log as a forecast summary |
 | POST | `/api/ingest/files` · `/ingest/text` · `/ingest/audio` · `/ingest/transcribe` | ingestion |
 | POST | `/api/admin/seed?reset=true` | reset to the demo world |
 
@@ -322,6 +337,7 @@ backend/
   ingestion/    markdown.py · documents.py · audio.py · extract.py · resolution.py · pipeline.py
   llm/          client.py (OpenAI-compatible, validated JSON) · mock.py (deterministic BDI)
   vtt_link/     client.py (VTT HTTP client) · scene.py (map links, footprints, DM scenes)
+                session.py (world-aware map briefs, portrait tokens, session log -> forecast)
   api/routes.py · main.py · config.py · tests/
 frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Atlas,Branches,TimeTravel,Ingest,NewWorld}.tsx
 scripts/seed_demo_world.py · scripts/import_azgaar.py · scripts/build_srd_catalogue.py

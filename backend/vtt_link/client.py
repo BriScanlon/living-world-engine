@@ -86,3 +86,27 @@ def media(path: str) -> httpx.Response:
     if r.status_code != 200:
         raise VTTError(f"VTT media {r.status_code}")
     return r
+
+
+def generate_map(description: str, *, title: str | None = None, tags: list[str] | None = None,
+                 style: str = "", animate: bool = False) -> dict[str, Any]:
+    """Queue an AI battle map on the VTT. Returns the job (poll with :func:`job`)."""
+    return _call("POST", "/api/generate", json={"description": description[:600], "title": title, "style": style,
+                                                "tags": tags or [], "animate": animate, "push": False})
+
+
+def make_token(name: str, description: str, tags: list[str] | None = None) -> dict[str, Any]:
+    """Queue a round top-down portrait token for a character."""
+    return _call("POST", "/api/tokens", json={"name": name[:80], "description": description[:600], "tags": tags or []})
+
+
+def job(job_id: str) -> dict[str, Any]:
+    return _call("GET", f"/api/jobs/{job_id}")
+
+
+def tokens() -> list[dict[str, Any]]:
+    return _call("GET", "/api/maps", params={"type": "token"})
+
+
+def session_log() -> list[dict[str, Any]]:
+    return _call("GET", "/api/session-log")["entries"]

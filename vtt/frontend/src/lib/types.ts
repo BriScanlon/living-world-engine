@@ -99,7 +99,7 @@ export interface TableState {
 
 export interface Job {
   id: string
-  kind: 'generate' | 'animate'
+  kind: 'generate' | 'animate' | 'token'
   status: 'queued' | 'running' | 'done' | 'error'
   stage: 'queued' | 'prompting' | 'base_map' | 'animating' | 'saving' | 'done' | 'error'
   stage_label?: string
@@ -123,7 +123,9 @@ export interface AppConfig {
 
 /** World context pushed by the Living World Engine for the place on the table (DM-only). */
 export interface ScenePerson {
+  id?: string
   name: string
+  portrait?: string | null
   role?: string | null
   species?: string | null
   char_class?: string | null
@@ -131,6 +133,15 @@ export interface ScenePerson {
   stats?: { name: string; ac?: number; hp?: number; cr?: string } | null
   wants?: string[]
   fears?: string[]
+}
+
+/** One line of the table's session log: a DM note, or a map shown / world scene visited. */
+export interface LogEntry {
+  id: number
+  at: number
+  kind: 'note' | 'map' | 'scene'
+  text: string
+  meta?: Record<string, unknown>
 }
 
 export interface Scene {

@@ -371,4 +371,39 @@ export const api = {
     req<{ map: LinkedMap | null; scene: { place: string; people: number; rumors: number; creatures: number } }>(
       `/places/${placeId}/to-table`, json(body)),
   srdInfo: () => req<{ attribution: string; license: string; counts: Record<string, number> }>("/srd"),
+  mapBrief: (placeId: string, branch: string, day: number | null) =>
+    req<MapBrief>(`/places/${placeId}/map-brief?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`),
+  paintMap: (placeId: string, body: { branch: string; day: number | null; description?: string; animate?: boolean }) =>
+    req<{ job: string; brief: MapBrief }>(`/places/${placeId}/paint-map`, json(body)),
+  collectPaint: (jobId: string) => req<PaintStatus>(`/vtt/jobs/${jobId}/collect`),
+  paintTokens: (placeId: string, body: { branch: string; day: number | null }) =>
+    req<{ queued: { name: string; job: string }[]; already: string[] }>(`/places/${placeId}/tokens`, json(body)),
+  tableLog: () => req<TableLog>("/vtt/session-log"),
 };
+
+export interface MapBrief {
+  place: string;
+  branch: string;
+  day: number;
+  title: string;
+  description: string;
+  events: string[];
+}
+
+export interface PaintStatus {
+  job: string;
+  status: "queued" | "running" | "done" | "error";
+  progress: number | null;
+  message: string | null;
+  error: string | null;
+  linked: { map: string; place: string; day: number } | null;
+}
+
+export interface TableLog {
+  summary: string;
+  entries: number;
+  notes: number;
+  places: string[];
+  start_day: number | null;
+  end_day: number | null;
+}
