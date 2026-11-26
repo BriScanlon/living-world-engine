@@ -179,6 +179,12 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     map.addSource("events", { type: "geojson", data: empty });
     map.addSource("rumors", { type: "geojson", data: empty });
     map.addSource("footprints", { type: "geojson", data: empty });
+    map.addSource("route", { type: "geojson", data: empty });
+    map.addLayer({
+      id: "route", type: "line", source: "route",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": "#f5c77e", "line-width": 2.5, "line-dasharray": [1.5, 1.5], "line-opacity": 0.9 },
+    });
     map.addLayer({
       id: "footprint-line", type: "line", source: "footprints", minzoom: 11,
       paint: { "line-color": "#f5c77e", "line-width": 1.5, "line-dasharray": [2, 1] },
@@ -292,6 +298,15 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     [branch, day, view],
   );
   openRef.current = openDetail;
+
+  // The way from the party to the open place, drawn on the globe
+  useEffect(() => {
+    const src = mapRef.current?.getSource("route") as GeoJSONSource | undefined;
+    if (!src) return;
+    const path = detail?.travel?.path;
+    src.setData({ type: "FeatureCollection", features: path && path.length > 1
+      ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: path } }] : [] });
+  }, [detail, state]);
   const stateRef = useRef<AtlasState | null>(null);
   stateRef.current = state;
 
@@ -405,6 +420,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
               ))}</Section>}
               {!!detail.places.length && <Section title="Places">{detail.places.map((p) => <li key={p.id}><button className="text-ember-300 hover:underline" onClick={() => openDetail(p.id)}>{p.name}</button> <span className="text-ink-400">{p.kind}</span></li>)}</Section>}
               {!!detail.events.length && <Section title="What happened">{detail.events.map((e) => <li key={e.id}><span className="font-mono text-xs text-ink-400">d{e.day}</span> {e.title}</li>)}</Section>}
+              {detail.travel && <TravelInfo t={detail.travel} />}
               {detail.view !== "party" && detail.party && (
                 <PartyMark detail={detail} branch={branch} day={day} onChanged={() => { openDetail(detail.id); load(); }} />
               )}
@@ -468,6 +484,28 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
             </ul>
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function days(n: number) {
+  if (n < 0.5) return "under a day";
+  const r = Math.round(n * 2) / 2;
+  return `${r} day${r === 1 ? "" : "s"}`;
+}
+
+function TravelInfo({ t }: { t: NonNullable<PlaceDetail["travel"]> }) {
+  const legs = [t.road_km ? `${t.road_km.toLocaleString()} by road` : "", t.sea_km ? `${t.sea_km.toLocaleString()} by ship` : ""]
+    .filter(Boolean);
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-400">Travel from {t.from}</div>
+      <div className="text-sm text-ink-200">
+        {days(t.days.foot)} on foot · {days(t.days.horse)} on horseback · {days(t.days.army)} for an army
+      </div>
+      <div className="text-xs text-ink-400">
+        {t.km.toLocaleString()} km{legs.length ? ` (${legs.join(", ")})` : " across country"} · news takes {days(t.days.rumor)}
       </div>
     </div>
   );

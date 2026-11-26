@@ -277,7 +277,7 @@ def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int 
     if pv and not known_state:
         return {}
     if pv:
-        return _party_place(w, d, pv, known_state)
+        return {**_party_place(w, d, pv, known_state), "travel": _travel(w, pv, doc_id)}
     marks = party.view(w)
     inside = {doc_id} | {l["@id"] for l in w.of_type("Location") if l.get("parent") == doc_id or l.get("province") == doc_id}
     ctl = w.controller_of(doc_id) or (w.controller_of(d["province"]) if d.get("province") else None)
@@ -302,11 +302,23 @@ def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int 
                   "from_day": m.get("in_world_start"),
                   "thumb": f"/api/vtt/media/{m['thumb_path']}" if m.get("thumb_path") else None}
                  for m in w.of_type("Map") if m.get("place") == doc_id],
+        "travel": _travel(w, marks, doc_id),
         "party": {"state": marks.place_state(doc_id), "here": marks.where == doc_id,
                   "marked": next((e["kind"] for e in w.of_type("EpistemicEdge") if marks.party
                                   and e["agent_id"] == marks.party["@id"] and e["fact_or_event_id"] == doc_id), None)}
         if marks.party else None,
     }
+
+
+def _travel(w: WorldView, pv: party.PartyView, doc_id: str) -> dict[str, Any] | None:
+    """How far this place is from where the party is now, by the quickest route."""
+    if not pv.where or pv.where == doc_id:
+        return None
+    from atlas.travel import for_world
+    r = for_world(w).between(pv.where, doc_id)
+    if not r or r.km < 0.5:
+        return None
+    return {"from": w.name(pv.where), "from_id": pv.where, **r.summary()}
 
 
 def _party_place(w: WorldView, d: dict[str, Any], pv: party.PartyView, state: str) -> dict[str, Any]:

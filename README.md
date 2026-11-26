@@ -242,7 +242,23 @@ only what they know, on that branch and day.
   it is up, every *Party knowledge* mark redraws it; older party maps of the same world are removed from the VTT
   library. *preview* opens the image.
 
-### 9. Virtual tabletop (`vtt/`)
+### 9. Travel times (`backend/atlas/travel.py`)
+
+Distance now matters in the world:
+
+* **Routes** are the quicker of across country or along the atlas's roads (Dijkstra over the road network). Overland
+  stretches count as difficult terrain (half pace, 25% longer than the straight line); stretches over water go by
+  ship. Places in the same town are no journey.
+* **Paces** follow the SRD's overland travel: 24 miles a day on foot, 30 on horseback, 12 for an army, news at 30 with
+  riders and merchants; ships make 48 miles a day.
+* **In forecasts**, an actor acting on a far-off place sets out at the start of the round and acts on arrival
+  (factions on the move march at army pace); the event's summary says how long it took, and late arrivals land after
+  the round. Rumors reach a far tavern only once news could get there, and the locals believe them from that day.
+* **In the atlas**, each place shows how far it is from where the party is (on foot, horseback, for an army, and how
+  long news takes), and the route is drawn on the globe. `GET /api/travel?a=&b=` gives the same between any two
+  things.
+
+### 10. Virtual tabletop (`vtt/`)
 
 The tabletop half of the project: a FastAPI + SQLite service with a DM screen and a player table synced over
 WebSockets, AI or imported battle maps, fog and tokens. See [vtt/README.md](vtt/README.md). It runs as the `vtt`
@@ -294,6 +310,7 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/atlas?branch=&day=&compare=&view=dm\|party` | live map state: territory, places, events, rumors (party view: fog of war) |
 | POST | `/api/party/knowledge` | `{place, state: visited\|heard\|unknown, branch, day}`: what the party knows of a place |
 | GET · POST | `/api/party/map.webp?branch=&day=` · `/api/party/map-to-table` | the party's overland map · show it on the table |
+| GET | `/api/travel?a=&b=&branch=&day=` | route and days between two things: on foot, horseback, an army, news |
 | GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |
 | POST | `/api/atlas/import` | import an Azgaar Full JSON export |
 | GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
@@ -354,6 +371,7 @@ backend/
   graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
   atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
                 party.py (party view: what the party knows, DM marks) · party_map.py (the party's overland map)
+                travel.py (routes, roads, sea legs, travel days)
   wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
   srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
                 builders.py · briefing.py (4-part diff) · seed.py
