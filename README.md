@@ -258,7 +258,16 @@ Distance now matters in the world:
   long news takes), and the route is drawn on the globe. `GET /api/travel?a=&b=` gives the same between any two
   things.
 
-### 10. Virtual tabletop (`vtt/`)
+### 10. Zoom-in maps (`backend/atlas/local.py`)
+
+Zoom close on the globe (zoom 9 or more) and a crosshair offers **✦ Paint a local map here** for any spot, not just
+existing places. The engine describes the spot from the world around it: the biome underfoot, the province and who
+holds it, the nearest settlement (how far, which way), a road, river or coast close by, creatures known in that
+province's wilds (or the SRD's fauna for the biome) and recent public events nearby. You can edit the name and brief;
+the spot becomes a `wilderness` place (painting the same spot again repaints it), the VTT paints it, and the map is
+linked at true scale, so its footprint appears on the globe exactly where you zoomed in.
+
+### 11. Virtual tabletop (`vtt/`)
 
 The tabletop half of the project: a FastAPI + SQLite service with a DM screen and a player table synced over
 WebSockets, AI or imported battle maps, fog and tokens. See [vtt/README.md](vtt/README.md). It runs as the `vtt`
@@ -311,6 +320,7 @@ Interactive docs at `/docs`. Highlights:
 | POST | `/api/party/knowledge` | `{place, state: visited\|heard\|unknown, branch, day}`: what the party knows of a place |
 | GET · POST | `/api/party/map.webp?branch=&day=` · `/api/party/map-to-table` | the party's overland map · show it on the table |
 | GET | `/api/travel?a=&b=&branch=&day=` | route and days between two things: on foot, horseback, an army, news |
+| GET · POST | `/api/atlas/local-brief?lon=&lat=` · `/api/atlas/local-map` | describe a spot on the globe · paint it (poll `/api/vtt/jobs/{job}/collect`) |
 | GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |
 | POST | `/api/atlas/import` | import an Azgaar Full JSON export |
 | GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
@@ -371,7 +381,7 @@ backend/
   graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
   atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
                 party.py (party view: what the party knows, DM marks) · party_map.py (the party's overland map)
-                travel.py (routes, roads, sea legs, travel days)
+                travel.py (routes, roads, sea legs, travel days) · local.py (zoom-in maps of any spot)
   wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
   srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
                 builders.py · briefing.py (4-part diff) · seed.py
