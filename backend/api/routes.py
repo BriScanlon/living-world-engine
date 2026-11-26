@@ -214,20 +214,41 @@ ATLAS_FILES = {"land.geojson", "biomes.geojson", "provinces.geojson", "rivers.ge
 
 
 @router.get("/atlas")
-def atlas(branch: str = MAIN, day: int | None = None, compare: str | None = None) -> dict[str, Any]:
-    """Live map state: province controllers, places, events and rumors on ``day`` of ``branch``."""
+def atlas(branch: str = MAIN, day: int | None = None, compare: str | None = None,
+          view: str = "dm") -> dict[str, Any]:
+    """Live map state: province controllers, places, events and rumors on ``day`` of ``branch``.
+    ``view=party`` shows only what the party knows (fog of war)."""
+    if view not in ("dm", "party"):
+        raise HTTPException(400, "view must be dm or party")
     try:
-        return atlas_state(_store(), branch, day, compare)
+        return atlas_state(_store(), branch, day, compare, view)
     except Exception as e:  # noqa: BLE001
         raise _err(e) from e
 
 
 @router.get("/atlas/place/{doc_id:path}")
-def atlas_place(doc_id: str, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
-    out = place_detail(_store(), doc_id, branch, day)
+def atlas_place(doc_id: str, branch: str = MAIN, day: int | None = None, view: str = "dm") -> dict[str, Any]:
+    out = place_detail(_store(), doc_id, branch, day, "party" if view == "party" else "dm")
     if not out:
-        raise HTTPException(404, f"{doc_id} not found on {branch}")
+        raise HTTPException(404, "The party doesn't know this place" if view == "party" else f"{doc_id} not found on {branch}")
     return out
+
+
+class PartyMarkBody(BaseModel):
+    place: str
+    state: str  # visited | heard | unknown
+    branch: str = MAIN
+    day: int | None = None
+
+
+@router.post("/party/knowledge")
+def party_knowledge(body: PartyMarkBody) -> dict[str, Any]:
+    """Mark what the party knows of a place from a day: been there, heard of it, or (from now) unknown."""
+    from atlas.party import mark
+    try:
+        return mark(_store(), body.place, body.state, branch=body.branch, day=body.day)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @router.get("/atlas/files/{slug}/{name}")
@@ -343,6 +364,7 @@ class ToTableBody(BaseModel):
     branch: str = MAIN
     day: int | None = None
     map_doc_id: str | None = None
+    mark_visited: bool = True  # the table is where the party is
 
 
 @router.post("/places/{place_id:path}/to-table")
@@ -351,7 +373,7 @@ def place_to_table(place_id: str, body: ToTableBody) -> dict[str, Any]:
     from vtt_link import client
     from vtt_link.scene import to_table
     try:
-        return to_table(_store(), place_id, body.branch, body.day, body.map_doc_id)
+        return to_table(_store(), place_id, body.branch, body.day, body.map_doc_id, body.mark_visited)
     except client.VTTError as e:
         raise HTTPException(502, str(e)) from e
     except ValueError as e:

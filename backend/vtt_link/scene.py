@@ -182,8 +182,12 @@ def build_scene(store: GraphStore, place_id: str, branch: str = "main", day: int
 
 
 def to_table(store: GraphStore, place_id: str, branch: str = "main", day: int | None = None,
-             map_doc_id: str | None = None) -> dict[str, Any]:
-    """Put a place on the table: its (chosen or current) linked map, plus the scene for the DM."""
+             map_doc_id: str | None = None, mark_visited: bool = True) -> dict[str, Any]:
+    """Put a place on the table: its (chosen or current) linked map, plus the scene for the DM.
+
+    The table is where the party is, so (unless ``mark_visited`` is off) the place is marked visited from that day
+    and the atlas's party view clears its fog.
+    """
     linked = maps_for(store, place_id, branch, day)
     chosen = next((m for m in linked if m["id"] == map_doc_id), None) if map_doc_id else (linked[0] if linked else None)
     if chosen:
@@ -199,5 +203,9 @@ def to_table(store: GraphStore, place_id: str, branch: str = "main", day: int | 
         face = faces.get(p["id"]) or {}
         p["portrait"], p["portrait_id"] = face.get("url"), face.get("id")  # the id lets the DM place the token
     client.send_scene(scene)
-    return {"map": chosen, "scene": {"place": scene["place"]["name"], "people": len(scene["people"]),
+    visited = False
+    if mark_visited:
+        from atlas.party import visit
+        visited = visit(store, place_id, branch=branch, day=scene["day"])
+    return {"map": chosen, "visited": visited, "scene": {"place": scene["place"]["name"], "people": len(scene["people"]),
                                      "rumors": len(scene["rumors"]), "creatures": len(scene["creatures"])}}
