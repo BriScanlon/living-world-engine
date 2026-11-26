@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     llm_concurrency: int = 4
     llm_timeout_seconds: float = 120.0
     llm_max_retries: int = 2
+    # Cap on each reply, so a model that starts looping stops instead of running until the timeout.
+    # The largest legitimate reply seen so far is about 1.5K tokens (lore extraction).
+    llm_max_tokens: int = 4096
+    # Sent as reasoning_effort when set: none | low | medium | high ("none" turns a reasoning model's thinking off).
+    llm_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
 
     # Simulation
     round_length_days: int = 3
