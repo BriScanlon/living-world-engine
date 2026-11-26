@@ -281,6 +281,19 @@ export interface PlaceDetail {
   maps?: LinkedMap[];
   party?: { state: PartyKnows; here: boolean; marked: "KNOWS" | "BELIEVES" | null } | null;
   view?: AtlasView;
+  travel?: Travel | null;
+}
+
+/** How far a place is from where the party is, by the quickest route (roads where they help). */
+export interface Travel {
+  from: string;
+  from_id: string;
+  km: number;
+  road_km: number;
+  sea_km: number;
+  straight_km: number;
+  days: { foot: number; horse: number; army: number; rumor: number };
+  path: [number, number][];
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {

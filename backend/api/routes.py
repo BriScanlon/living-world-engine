@@ -234,6 +234,18 @@ def atlas_place(doc_id: str, branch: str = MAIN, day: int | None = None, view: s
     return out
 
 
+@router.get("/travel")
+def travel_between(a: str, b: str, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
+    """Route and travel days between two things (places, people, factions): on foot, horseback, an army, news."""
+    from atlas.travel import for_world
+    docs = _store().all_documents(branch)
+    w = WorldView(docs, day if day is not None else WorldView(docs).max_day())
+    r = for_world(w).between(a, b)
+    if not r:
+        raise HTTPException(404, "One of those has no position on the map")
+    return {"from": w.name(a), "to": w.name(b), **r.summary()}
+
+
 class PartyMarkBody(BaseModel):
     place: str
     state: str  # visited | heard | unknown

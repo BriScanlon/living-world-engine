@@ -21,6 +21,7 @@ from typing import Annotated, Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from atlas import travel
 from config import Settings, get_settings
 from graph import builders as b
 from graph.store import GraphStore, get_store, to_branch_id
@@ -338,6 +339,21 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
     span = max(1, hi - lo)
     for i, d in enumerate(drafts):
         d.day = min(hi, max(lo + 1, lo + 1 + (i * span) // max(1, len(drafts))))
+    # Nobody acts on a far-off place before they could get there: set out at the round's start, arrive, then act.
+    # Factions on the move march at army pace; everyone else walks. Late arrivals land after this round.
+    trav = travel.for_world(world)
+    journeys: dict[int, dict[str, Any]] = {}
+    for i, d in enumerate(drafts):
+        if d.event_type in ("goal_progress", "goal_achieved") or not d.actor_ids:
+            continue
+        dest = d.location_id if world.get(d.location_id) else next((t for t in d.target_ids if world.get(t)), None)
+        actor = world.get(d.actor_ids[0]) or {}
+        pace = "army" if actor.get("@type") == "Faction" and d.event_type in ("conflict", "faction_move") else "foot"
+        days = trav.days(d.actor_ids[0], dest, pace) if dest else 0
+        if days and lo + days > d.day:
+            d.day = lo + days
+            d.summary = f"{d.summary.rstrip()} ({'A march' if pace == 'army' else 'A journey'} of {days} day{'s' if days != 1 else ''}.)"
+            journeys[i] = {"days": days, "pace": pace}
     m = Mutator(world, state["session_label"], (state["seed"], "round", r))
     reports = []
     known_events = {e["@id"] for e in world.of_type("Event")}
@@ -345,7 +361,7 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
         rep = m.apply_event(d, i, caused_by_ok=known_events)
         reports.append({**rep, "round": r, "day": d.day, "summary": d.summary, "event_type": d.event_type,
                         "visibility": d.visibility, "caused_by": d.caused_by, "actors": d.actor_ids,
-                        "targets": d.target_ids})
+                        "targets": d.target_ids, "travel": journeys.get(i)})
     # Completed clocks trigger concrete consequences
     for rep in list(reports):
         for gr in rep["goals"]:
@@ -397,13 +413,16 @@ def propagate_rumors(state: SimState, config) -> dict[str, Any]:
         batch = c.llm().structured(prompts.RUMOR_SYSTEM, prompts.rumor_user(events, world), RumorBatch)
 
     m = Mutator(world, state["session_label"], (state["seed"], "rumor", r))
+    trav = travel.for_world(world)
     out = []
     for i, rd in enumerate(batch.rumors):
         ev = world.get(rd.about_event)
         venue = world.get(rd.location_id)
         if not ev or not venue or venue["@type"] != "Location":
             continue
-        day = min(hi, (ev.get("in_world_start") or lo) + 1)
+        # News travels with merchants and riders: a far tavern hears of it days later (maybe after this round)
+        origin = ev.get("location") or next(iter(ev.get("targets") or ev.get("actors") or []), None)
+        day = (ev.get("in_world_start") or lo) + max(1, trav.days(origin, venue["@id"], "rumor"))
         doc = b.rumor(rd.text, rd.dialogue, location=venue["@id"], accuracy=rd.accuracy, day=day,
                       about_event=ev["@id"], speaker=rd.speaker, session=state["session_label"],
                       salt=(state["seed"], r, i))
