@@ -16,6 +16,7 @@ frontend/dist/
 uploads/
 *.tsbuildinfo
 
-# dev data (atlas layers etc.)
+# dev data (atlas layers etc.) and local data written by the backend (run records, campaign choice)
 .data-dev/
+backend/data/
 data/

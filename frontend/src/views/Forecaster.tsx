@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, Health, ProgressEvent } from "../api";
+import { api, Health, ProgressEvent, RunSummary } from "../api";
 import { Badge, Button, Card, cx, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 const STEPS = [
@@ -28,7 +28,48 @@ export default function Forecaster({ health, onOpenBriefing, onChanged }: {
   const [status, setStatus] = useState<"idle" | "running" | "complete" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
   const [busyFile, setBusyFile] = useState(false);
+  const [stalled, setStalled] = useState<RunSummary[]>([]);
   const esRef = useRef<EventSource | null>(null);
+
+  const loadStalled = () =>
+    api.forecasts().then((rs) => setStalled(rs.filter((r) => r.resumable))).catch(() => undefined);
+  useEffect(() => { loadStalled(); }, []);
+
+  /** Follow a run's progress events (from the start: a resumed run replays its earlier steps first). */
+  const follow = (runId: string, branch: string) => {
+    esRef.current?.close();
+    setEvents([]);
+    setRun({ id: runId, branch });
+    setStatus("running");
+    const es = new EventSource(`/api/forecasts/${runId}/events`);
+    esRef.current = es;
+    es.onmessage = (m) => {
+      const ev = JSON.parse(m.data) as ProgressEvent;
+      setEvents((prev) => [...prev, ev]);
+      if (ev.kind === "error") setError(ev.message);
+    };
+    es.addEventListener("end", (m) => {
+      const d = JSON.parse((m as MessageEvent).data);
+      setStatus(d.status === "complete" ? "complete" : "failed");
+      es.close();
+      onChanged();
+      loadStalled();
+    });
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) return;
+    };
+  };
+
+  const resume = async (r: RunSummary) => {
+    setError(null);
+    try {
+      await api.resumeForecast(r.id);
+      setStalled((s) => s.filter((x) => x.id !== r.id));
+      follow(r.id, r.branch);
+    } catch (e) {
+      setError(String((e as Error).message));
+    }
+  };
 
   useEffect(() => {
     api.meta().then((m) => {
@@ -48,25 +89,8 @@ export default function Forecaster({ health, onOpenBriefing, onChanged }: {
         session_number: session, start_day: startDay, end_day: endDay, forecast_days: forecastDays,
         session_summary: summary, base_branch: "main",
       });
-      setRun({ id: r.run_id, branch: r.branch });
-      setStatus("running");
       onChanged();
-      const es = new EventSource(`/api/forecasts/${r.run_id}/events`);
-      esRef.current = es;
-      es.onmessage = (m) => {
-        const ev = JSON.parse(m.data) as ProgressEvent;
-        setEvents((prev) => [...prev, ev]);
-        if (ev.kind === "error") setError(ev.message);
-      };
-      es.addEventListener("end", (m) => {
-        const d = JSON.parse((m as MessageEvent).data);
-        setStatus(d.status === "complete" ? "complete" : "failed");
-        es.close();
-        onChanged();
-      });
-      es.onerror = () => {
-        if (es.readyState === EventSource.CLOSED) return;
-      };
+      follow(r.run_id, r.branch);
     } catch (e) {
       setError(String((e as Error).message));
     }
@@ -104,6 +128,27 @@ export default function Forecaster({ health, onOpenBriefing, onChanged }: {
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+      {stalled.length > 0 && (
+        <div className="lg:col-span-2">
+          <Card title="Unfinished forecasts" subtitle="Interrupted by a restart, or stopped by an error. Resume picks up after the last finished step.">
+            <ul className="space-y-2 text-sm">
+              {stalled.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center gap-3">
+                  <Badge tone={r.status === "interrupted" ? "ember" : "red"}>{r.status}</Badge>
+                  <span className="text-ink-100">Session {r.request.session_number}</span>
+                  <span className="text-xs text-ink-400">
+                    days {r.request.end_day}–{r.request.end_day + r.request.forecast_days} · next step {r.next_step}
+                    {r.error ? ` · ${r.error}` : ""}
+                  </span>
+                  <Button className="ml-auto" disabled={status === "running"} onClick={() => resume(r)}>
+                    ▶ Resume
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      )}
       <Card
         title="Session Forecaster"
         subtitle="Tell the engine what the party did; it forks canon and lets the world move while they rest."

@@ -53,6 +53,7 @@ PARTY_VERBS = {"steal": "steals", "kill": "kills", "help": "helps", "harm": "cro
 
 class SimState(TypedDict, total=False):
     run_id: str
+    resume_at: str  # set only when resuming: the node to start from
     request: dict[str, Any]
     branch: str
     base_commit: str | None
@@ -90,8 +91,27 @@ def _ctx(config) -> Ctx:
     return config["configurable"]["ctx"]
 
 
+# Keys LangGraph accumulates (Annotated[list, add]); everything else is replaced by a node's output.
+ADDITIVE = ("activations", "all_intents", "event_reports", "rumor_ids", "violations")
+NEXT = {"fork_canon": "apply_session_delta", "apply_session_delta": "select_active_agents",
+        "select_active_agents": "run_agent_turns", "run_agent_turns": "world_arbiter",
+        "world_arbiter": "propagate_rumors", "finalize": None}
+
+
+def _merged(state: SimState, out: dict[str, Any]) -> dict[str, Any]:
+    """The state after a node, as LangGraph will see it: additive keys appended, the rest replaced."""
+    merged = {k: v for k, v in state.items() if k != "resume_at"}
+    for k, v in out.items():
+        merged[k] = list(state.get(k) or []) + list(v) if k in ADDITIVE else v
+    return merged
+
+
+def _next_node(name: str, merged: dict[str, Any]) -> str | None:
+    return _more_rounds(merged) if name == "propagate_rumors" else NEXT[name]
+
+
 def node(name: str) -> Callable:
-    """Wrap a node with start/done progress events."""
+    """Wrap a node with start/done progress events and a checkpoint (state + next node) once it has finished."""
     def deco(fn: Callable) -> Callable:
         @wraps(fn)
         def inner(state: SimState, config) -> dict[str, Any]:
@@ -100,7 +120,10 @@ def node(name: str) -> Callable:
             label = name if name in ("fork_canon", "apply_session_delta", "finalize") else f"{name} (round {rnd + 1})"
             registry.emit(run_id, name, "start", f"{label} …", {"round": rnd})
             out = fn(state, config)
-            registry.emit(run_id, name, "done", out.pop("_message", label), {"round": rnd, **out.pop("_data", {})})
+            message, data = out.pop("_message", label), out.pop("_data", {})
+            merged = _merged(state, out)
+            registry.checkpoint(run_id, _next_node(name, merged), merged)
+            registry.emit(run_id, name, "done", message, {"round": rnd, **data})
             return out
         return inner
     return deco
@@ -479,7 +502,10 @@ def build_graph():
     for fn in (fork_canon, apply_session_delta, select_active_agents, run_agent_turns, world_arbiter,
                propagate_rumors, finalize):
         g.add_node(fn.__name__, fn)
-    g.add_edge(START, "fork_canon")
+    # A fresh run starts at fork_canon; a resumed one at the node after its last checkpoint.
+    g.add_conditional_edges(START, lambda s: s.get("resume_at") or "fork_canon",
+                            [fn.__name__ for fn in (fork_canon, apply_session_delta, select_active_agents,
+                                                    run_agent_turns, world_arbiter, propagate_rumors, finalize)])
     g.add_edge("fork_canon", "apply_session_delta")
     g.add_edge("apply_session_delta", "select_active_agents")
     g.add_edge("select_active_agents", "run_agent_turns")
@@ -505,42 +531,67 @@ def branch_name(session_number: int, now: datetime | None = None) -> str:
     return f"forecast/session-{session_number}-{now.strftime('%Y%m%dt%H%M%S')}"
 
 
-def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | None = None) -> dict[str, Any]:
+def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | None = None, *,
+             resume: bool = False) -> dict[str, Any]:
     s = settings or get_settings()
     store = store or get_store()
     req = ForecastRequest(**run.request)
-    state: SimState = {
-        "run_id": run.id, "request": req.model_dump(), "branch": run.branch,
-        "session_label": f"forecast/session-{req.session_number}",
-        "seed": req.seed if req.seed is not None else req.session_number,
-        "rounds": plan_rounds(req.end_day, req.forecast_days, s), "round": 0,
-    }
-    run.status = "running"
+    if resume:
+        if not run.next_step:  # resume_forecast() has already checked the status
+            raise RuntimeError(f"Run {run.id} has no checkpoint to resume from")
+        state: SimState = {**run.checkpoint["state"], "resume_at": run.next_step}  # type: ignore[index]
+        registry.emit(run.id, "resume", "resume", f"Resuming from {run.next_step}", {"next": run.next_step})
+    else:
+        state = {
+            "run_id": run.id, "request": req.model_dump(), "branch": run.branch,
+            "session_label": f"forecast/session-{req.session_number}",
+            "seed": req.seed if req.seed is not None else req.session_number,
+            "rounds": plan_rounds(req.end_day, req.forecast_days, s), "round": 0,
+        }
+    registry.set_status(run, "running")
     try:
         final = GRAPH.invoke(state, {"configurable": {"ctx": Ctx(store, s)}, "recursion_limit": 200})
-        run.status = "complete"
-        run.result = {"branch": run.branch, "events": len(final.get("event_reports", [])),
-                      "rumors": len(final.get("rumor_ids", []))}
-        registry.emit(run.id, "complete", "complete", "Forecast ready", run.result)
+        result = {"branch": run.branch, "events": len(final.get("event_reports", [])),
+                  "rumors": len(final.get("rumor_ids", []))}
+        registry.set_status(run, "complete", result=result)
+        registry.emit(run.id, "complete", "complete", "Forecast ready", result)
         return final
-    except Exception as e:  # surface to UI, keep branch for inspection
+    except Exception as e:  # surface to UI, keep branch (and checkpoint) for inspection or a resume
         log.exception("Forecast %s failed", run.id)
-        run.status = "failed"
-        run.error = f"{type(e).__name__}: {e}"
-        registry.emit(run.id, "error", "error", run.error, {"trace": traceback.format_exc()[-2000:]})
+        registry.set_status(run, "failed", error=f"{type(e).__name__}: {e}")
+        registry.emit(run.id, "error", "error", run.error, {"trace": traceback.format_exc()[-2000:],
+                                                          "next": run.next_step})
         raise
 
 
 def start_forecast(req: ForecastRequest) -> Run:
-    run = registry.create(branch_name(req.session_number), req.model_dump())
     store = get_store().bound()  # keep writing to this campaign even if the user switches
+    run = registry.create(branch_name(req.session_number), req.model_dump(), campaign=store.db)
     t = threading.Thread(target=lambda: _safe(run, store), name=f"forecast-{run.id}", daemon=True)
     t.start()
     return run
 
 
-def _safe(run: Run, store: GraphStore | None = None) -> None:
+def resume_forecast(run_id: str) -> Run:
+    """Continue an interrupted or failed run from the node after its last checkpoint, on its own campaign."""
+    run = registry.get(run_id)
+    if not run:
+        raise KeyError(run_id)
+    if not run.resumable:
+        raise ValueError(f"This run is {run.status}" + ("" if run.next_step else " and has no checkpoint to resume from"))
+    base = get_store()
+    store = GraphStore(base.s, run.campaign) if run.campaign else base.bound()
+    registry.set_status(run, "queued")
+    t = threading.Thread(target=lambda: _safe(run, store, resume=True), name=f"forecast-{run.id}", daemon=True)
+    t.start()
+    return run
+
+
+def _safe(run: Run, store: GraphStore | None = None, resume: bool = False) -> None:
     try:
-        run_sync(run, store)
-    except Exception:
-        pass
+        run_sync(run, store, resume=resume)
+    except Exception as e:  # noqa: BLE001 - run_sync records failures; this catches ones before it could start
+        if run.status in ("queued", "running"):
+            log.exception("Forecast %s could not start", run.id)
+            registry.set_status(run, "failed", error=f"{type(e).__name__}: {e}")
+            registry.emit(run.id, "error", "error", run.error, {"next": run.next_step})

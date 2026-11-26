@@ -22,7 +22,7 @@ from graph.store import MAIN, GraphStoreError, get_store, to_branch_id
 from graph.world import WorldView
 from ingestion import audio, documents
 from ingestion.pipeline import JOBS, Source, start_job
-from simulation.engine import start_forecast
+from simulation.engine import resume_forecast, start_forecast
 from simulation.models import ForecastRequest
 from simulation.runs import registry
 
@@ -650,6 +650,18 @@ def get_forecast(run_id: str) -> dict[str, Any]:
     return {**run.summary(), "events": run.events, "result": run.result}
 
 
+@router.post("/forecasts/{run_id}/resume")
+def resume_run(run_id: str) -> dict[str, Any]:
+    """Continue an interrupted (backend restarted) or failed run from its last checkpoint."""
+    try:
+        run = resume_forecast(run_id)
+    except KeyError as e:
+        raise HTTPException(404, "Unknown run") from e
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    return {"run_id": run.id, "branch": run.branch}
+
+
 @router.get("/forecasts/{run_id}/events")
 async def forecast_events(run_id: str) -> StreamingResponse:
     """Server-sent events: live LangGraph step progress."""
@@ -663,7 +675,7 @@ async def forecast_events(run_id: str) -> StreamingResponse:
             while sent < len(run.events):
                 yield f"data: {json.dumps(run.events[sent], default=str)}\n\n"
                 sent += 1
-            if run.status in ("complete", "failed") and sent >= len(run.events):
+            if run.status in ("complete", "failed", "interrupted") and sent >= len(run.events):
                 yield f"event: end\ndata: {json.dumps({'status': run.status, 'branch': run.branch})}\n\n"
                 return
             await asyncio.sleep(0.25)

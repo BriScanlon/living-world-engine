@@ -213,6 +213,19 @@ export interface IngestJob {
   error: string | null;
 }
 
+/** A forecast run as the backend remembers it (runs are kept on disk and survive restarts). */
+export interface RunSummary {
+  id: string;
+  branch: string;
+  status: "queued" | "running" | "complete" | "failed" | "interrupted";
+  error: string | null;
+  request: { session_number: number; start_day: number; end_day: number; forecast_days: number };
+  created_at: number;
+  updated_at: number;
+  resumable: boolean;
+  next_step: string | null;
+}
+
 export interface AtlasState {
   atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean } | null;
   branch: string;
@@ -345,7 +358,8 @@ export const api = {
     session_summary: string;
     base_branch: string;
   }) => req<{ run_id: string; branch: string }>("/forecasts", json(body)),
-  forecasts: () => req<any[]>("/forecasts"),
+  forecasts: () => req<RunSummary[]>("/forecasts"),
+  resumeForecast: (id: string) => req<{ run_id: string; branch: string }>(`/forecasts/${id}/resume`, { method: "POST" }),
   seed: () => req<any>("/admin/seed?reset=true", { method: "POST" }),
   ingestText: (body: { title: string; text: string; branch: string; is_session: boolean; in_world_day: number | null }) =>
     req<IngestJob>("/ingest/text", json(body)),
