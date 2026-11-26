@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap, Marker } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, AtlasView, Branch, MapBrief, PaintStatus, PartyKnows, PlaceDetail, VttMap } from "../api";
+import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, PartyKnows, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -32,6 +32,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const [branch, setBranch] = useState("main");
   const [compare, setCompare] = useState(true);
   const [view, setView] = useState<AtlasView>("dm");
+  const [zoom, setZoom] = useState(0);
   const [tableNote, setTableNote] = useState<string | null>(null);
   const [tableBusy, setTableBusy] = useState(false);
   const partyToTable = async () => {
@@ -99,6 +100,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     map.on("load", () => setReady(true));
+    map.on("zoomend", () => setZoom(map.getZoom()));
     mapRef.current = map;
     if (import.meta.env.DEV) (window as unknown as { __atlasMap: MlMap }).__atlasMap = map; // for debugging
     return () => {
@@ -381,6 +383,10 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(300px,1fr)]">
         <div className="relative overflow-hidden rounded-xl border border-ink-700/70">
           <div ref={mapEl} className="h-[70vh] min-h-[480px] w-full" />
+          {view === "dm" && zoom >= LOCAL_ZOOM && (
+            <LocalPaint mapRef={mapRef} branch={branch} day={day}
+              onLinked={(place) => { load(); openDetail(place); }} />
+          )}
           {state?.atlas && (
             <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-ink-950/80 px-3 py-2 text-xs text-ink-200">
               <div className="font-display text-sm text-ink-100">{state.atlas.name}</div>
@@ -486,6 +492,91 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const LOCAL_ZOOM = 9; // close enough to pick a spot for a battle map
+
+/** Zoomed in close: paint a battle map of the spot under the crosshair, described from the world around it. */
+function LocalPaint({ mapRef, branch, day, onLinked }: {
+  mapRef: React.MutableRefObject<MlMap | null>; branch: string; day: number | null; onLinked: (place: string) => void;
+}) {
+  const [brief, setBrief] = useState<LocalBrief | null>(null);
+  const [name, setName] = useState("");
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
+  const look = async () => {
+    const c = mapRef.current?.getCenter();
+    if (!c) return;
+    setErr(null); setStatus(null); setBusy(true);
+    try {
+      const b = await api.localBrief(+c.lng.toFixed(6), +c.lat.toFixed(6), branch, day);
+      setBrief(b); setName(b.name); setText(b.description);
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const paint = async () => {
+    if (!brief) return;
+    setErr(null); setBusy(true);
+    try {
+      const r = await api.paintLocal({ lon: brief.look.lon, lat: brief.look.lat, branch, day,
+        name: name !== brief.name ? name : undefined, description: text !== brief.description ? text : undefined });
+      setBrief(null); setStatus("Queued on the VTT…");
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 2000));
+        if (!alive.current) return;
+        const s = await api.collectPaint(r.job);
+        if (!alive.current) return;
+        if (s.status === "error") { setErr(s.error ?? "The VTT couldn't paint it"); setStatus(null); return; }
+        if (s.linked) {
+          setStatus(`Painted “${r.name}”. It's on the globe here at true scale; zooming in…`);
+          onLinked(r.place);
+          mapRef.current?.flyTo({ center: [brief.look.lon, brief.look.lat], zoom: 18.5, speed: 1.2 });
+          return;
+        }
+        setStatus(`Painting on the VTT… ${s.progress != null ? Math.round(s.progress * 100) + "%" : ""}`);
+      }
+    } catch (e) { setErr((e as Error).message); setStatus(null); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute left-1/2 top-0 h-full w-px bg-ember-300/80" />
+        <div className="absolute left-0 top-1/2 h-px w-full bg-ember-300/80" />
+      </div>
+      <div className="absolute bottom-10 left-1/2 w-[min(28rem,90%)] -translate-x-1/2 rounded-lg bg-ink-950/90 p-2.5 text-sm shadow-lg ring-1 ring-ink-700">
+        {!brief ? (
+          <div className="flex items-center gap-2">
+            <Button variant="primary" disabled={busy} onClick={look} title="Describe the spot under the crosshair from the world around it">
+              {busy ? <Spinner /> : "✦"} Paint a local map here
+            </Button>
+            {status && <span className="text-xs text-ink-300">{status}</span>}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <input className={cx(inputCls, "py-1 text-sm")} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+            <textarea className={cx(inputCls, "h-24 resize-y text-xs leading-snug")} maxLength={600} value={text}
+              onChange={(e) => setText(e.target.value)} />
+            <div className="flex items-center gap-1.5">
+              <Button variant="primary" disabled={busy || text.trim().length < 3} onClick={paint}>
+                {brief.existing ? "Repaint" : "Paint"} on day {brief.day}
+              </Button>
+              <Button variant="ghost" onClick={() => setBrief(null)}>Cancel</Button>
+              {!brief.look.on_land && <span className="text-xs text-amber-300">That's open water.</span>}
+            </div>
+          </div>
+        )}
+        {err && <p className="mt-1 text-xs text-rose-300">{err}</p>}
+      </div>
+    </>
   );
 }
 

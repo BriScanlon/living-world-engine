@@ -246,6 +246,43 @@ def travel_between(a: str, b: str, branch: str = MAIN, day: int | None = None) -
     return {"from": w.name(a), "to": w.name(b), **r.summary()}
 
 
+@router.get("/atlas/local-brief")
+def atlas_local_brief(lon: float, lat: float, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
+    """What is at a spot on the globe: biome, province and holder, nearest town, road/river/coast, creatures, events."""
+    from atlas.local import brief
+    try:
+        return brief(_store(), lon, lat, branch, day)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+class LocalMapBody(BaseModel):
+    lon: float
+    lat: float
+    branch: str = MAIN
+    day: int | None = None
+    name: str | None = None
+    description: str | None = None
+    style: str = ""
+    animate: bool = False
+
+
+@router.post("/atlas/local-map")
+def atlas_local_map(body: LocalMapBody) -> dict[str, Any]:
+    """Paint a battle map of a spot on the globe; poll /vtt/jobs/{job}/collect to link it where it belongs."""
+    from atlas.local import paint_here
+    from vtt_link import client
+    if not (-180 <= body.lon <= 180 and -90 <= body.lat <= 90):
+        raise HTTPException(400, "lon/lat out of range")
+    try:
+        return paint_here(_store(), body.lon, body.lat, branch=body.branch, day=body.day, name=body.name,
+                          description=body.description, style=body.style, animate=body.animate)
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
 class PartyMarkBody(BaseModel):
     place: str
     state: str  # visited | heard | unknown

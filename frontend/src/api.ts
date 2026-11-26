@@ -407,7 +407,20 @@ export const api = {
   paintTokens: (placeId: string, body: { branch: string; day: number | null }) =>
     req<{ queued: { name: string; job: string }[]; already: string[] }>(`/places/${placeId}/tokens`, json(body)),
   tableLog: () => req<TableLog>("/vtt/session-log"),
+  localBrief: (lon: number, lat: number, branch: string, day: number | null) =>
+    req<LocalBrief>(`/atlas/local-brief?lon=${lon}&lat=${lat}&branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`),
+  paintLocal: (body: { lon: number; lat: number; branch: string; day: number | null; name?: string; description?: string }) =>
+    req<{ place: string; name: string; job: string }>("/atlas/local-map", json(body)),
 };
+
+/** A spot on the globe, described from the world around it (for a zoom-in battle map). */
+export interface LocalBrief {
+  name: string;
+  description: string;
+  day: number;
+  existing: string | null;
+  look: { lon: number; lat: number; on_land: boolean; nearest?: { name: string; km: number; direction: string } };
+}
 
 export interface MapBrief {
   place: string;
