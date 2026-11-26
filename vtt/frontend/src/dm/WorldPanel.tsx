@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { Scene } from '../lib/types'
-import { Panel } from './ui'
+import type { Scene, Token } from '../lib/types'
+import { Button, Panel } from './ui'
 
 const ACCURACY: Record<string, string> = {
   True: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/40',
@@ -9,7 +9,12 @@ const ACCURACY: Record<string, string> = {
 }
 
 /** World context for the place on the table, sent from the Living World Engine's atlas. DM eyes only. */
-export function WorldPanel({ scene }: { scene: Scene | null }) {
+export function WorldPanel({ scene, send, tokens, hasMap }: {
+  scene: Scene | null
+  send: (msg: unknown) => void
+  tokens: Token[]
+  hasMap: boolean
+}) {
   const [open, setOpen] = useState<Record<string, boolean>>({ people: true, rumors: true })
   if (!scene) {
     return (
@@ -22,6 +27,10 @@ export function WorldPanel({ scene }: { scene: Scene | null }) {
       </Panel>
     )
   }
+  const onTable = new Set(tokens.map((t) => t.asset_id).filter(Boolean))
+  const placeable = (scene.people ?? []).filter((p) => p.portrait_id && !onTable.has(p.portrait_id))
+  const place = (assetId: string) => send({ type: 'token_add', token: { asset_id: assetId } })
+
   const section = (key: string, title: string, count: number, body: React.ReactNode) =>
     count > 0 && (
       <div className="border-t border-white/10 pt-2">
@@ -48,6 +57,13 @@ export function WorldPanel({ scene }: { scene: Scene | null }) {
 
         {section('people', 'Who is here', scene.people?.length ?? 0, (
           <ul className="space-y-2">
+            {hasMap && placeable.length > 1 && (
+              <li>
+                <Button className="w-full !py-1 text-xs" onClick={() => placeable.forEach((p) => place(p.portrait_id!))}>
+                  ◉ Put everyone on the table ({placeable.length})
+                </Button>
+              </li>
+            )}
             {scene.people!.map((p, i) => (
               <li key={i} className="flex gap-2">
                 {p.portrait && <img src={p.portrait} alt="" className="h-10 w-10 shrink-0 rounded-full ring-1 ring-white/20" />}
@@ -60,6 +76,12 @@ export function WorldPanel({ scene }: { scene: Scene | null }) {
                 {!!p.wants?.length && <div className="text-xs text-sky-300">wants {p.wants.join('; ')}</div>}
                 {!!p.fears?.length && <div className="text-xs text-rose-300">fears {p.fears.join('; ')}</div>}
                 </div>
+                {hasMap && p.portrait_id && (
+                  onTable.has(p.portrait_id)
+                    ? <span className="ml-auto shrink-0 self-start text-[10px] text-emerald-400">on table</span>
+                    : <Button variant="subtle" className="ml-auto shrink-0 self-start !px-1.5 !py-0.5 text-xs" title="Put their token on the table"
+                        onClick={() => place(p.portrait_id!)}>◉ Place</Button>
+                )}
               </li>
             ))}
           </ul>

@@ -143,7 +143,7 @@ def test_world_scene_is_dm_only_and_persists():
     with TestClient(app) as client:
         assert client.post("/api/scene", json={"place": {}}).status_code == 400
         with client.websocket_connect("/ws?role=dm") as dm, client.websocket_connect("/ws?role=table") as table:
-            first_dm = [dm.receive_json() for _ in range(3)]
+            first_dm = [dm.receive_json() for _ in range(5)]
             assert any(m["type"] == "scene" for m in first_dm)
             table.receive_json()
             assert client.post("/api/scene", json=scene).json()["ok"]
@@ -207,3 +207,53 @@ def test_token_jobs_paint_tagged_portraits():
         assert t["title"] == "Wenna Tull" and t["tags"] == ["lwe:Character/wenna-tull"] and t["thumb_url"]
         assert client.get(t["media_url"]).status_code == 200
         assert client.post("/api/tokens", json={"name": "x", "description": "ok desc", "tags": ["a" * 200]}).status_code == 400
+
+
+def _until(ws, kind: str, limit: int = 20) -> dict:
+    for _ in range(limit):
+        m = ws.receive_json()
+        if m["type"] == kind:
+            return m
+    raise AssertionError(f"no {kind} message")
+
+
+def test_tokens_per_map_and_hidden_ones_never_reach_the_table():
+    with TestClient(app) as client:
+        a = client.get(f"/api/maps/{_wait_job(client, client.post('/api/generate', json={'description': 'harbour', 'animate': False}).json()['id'])['result_asset_id']}").json()
+        b = client.get(f"/api/maps/{_wait_job(client, client.post('/api/generate', json={'description': 'manor', 'animate': False}).json()['id'])['result_asset_id']}").json()
+        face = client.get(f"/api/maps/{_wait_job(client, client.post('/api/tokens', json={'name': 'Sela Marrow', 'description': 'guild boss'}).json()['id'])['result_asset_id']}").json()
+        client.post(f"/api/maps/{a['id']}/push")
+        client.delete("/api/table/tokens")
+
+        assert client.post("/api/table/tokens", json={"asset_id": a["id"]}).status_code == 400  # a map, not a token
+        assert client.post("/api/table/tokens", json={"asset_id": "nope"}).status_code == 400
+        sela = client.post("/api/table/tokens", json={"asset_id": face["id"], "x": 0.25, "y": 9, "size": 2.2}).json()
+        assert sela["name"] == "Sela Marrow" and sela["img"] == face["media_url"]
+        assert (sela["x"], sela["y"], sela["size"]) == (0.25, 1.0, 2)  # clamped to the map, snapped to a size
+        spy = client.post("/api/table/tokens", json={"name": "Guild spy", "hidden": True}).json()
+        assert spy["img"] is None and spy["hidden"]
+
+        with client.websocket_connect("/ws?role=dm") as dm, client.websocket_connect("/ws?role=table") as table:
+            assert {t["name"] for t in _until(table, "tokens")["tokens"]} == {"Sela Marrow"}
+            assert {t["name"] for t in _until(dm, "tokens")["tokens"]} == {"Sela Marrow", "Guild spy"}
+            dm.send_json({"type": "token_move", "id": sela["id"], "x": 0.6, "y": 0.4})
+            moved = _until(table, "tokens")["tokens"]
+            assert (moved[0]["x"], moved[0]["y"]) == (0.6, 0.4)
+            dm.send_json({"type": "token_update", "id": spy["id"], "patch": {"hidden": False, "img": "http://evil"}})
+            shown = _until(table, "tokens")["tokens"]
+            assert {t["name"] for t in shown} == {"Sela Marrow", "Guild spy"}
+            assert next(t for t in shown if t["name"] == "Guild spy")["img"] is None  # clients can't set pictures
+            table.send_json({"type": "token_remove", "id": sela["id"]})  # players can't edit tokens
+            dm.send_json({"type": "token_remove", "id": spy["id"]})
+            assert [t["name"] for t in _until(table, "tokens")["tokens"]] == ["Sela Marrow"]
+
+        client.post(f"/api/maps/{b['id']}/push")  # another map has its own tokens
+        assert client.get("/api/table/tokens").json()["tokens"] == []
+        client.post(f"/api/maps/{a['id']}/push")
+        assert [t["name"] for t in client.get("/api/table/tokens").json()["tokens"]] == ["Sela Marrow"]
+
+    with TestClient(app) as client:  # survives a restart; deleting the portrait keeps a plain disc
+        assert client.get("/api/table/tokens").json()["tokens"][0]["x"] == 0.6
+        client.delete(f"/api/maps/{face['id']}")
+        t = client.get("/api/table/tokens").json()["tokens"][0]
+        assert t["img"] is None and t["asset_id"] is None and t["name"] == "Sela Marrow"

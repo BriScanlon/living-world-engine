@@ -32,6 +32,11 @@ export function Library({ version, currentMapId, toast }: { version: number; cur
 
   const push = async (a: Asset) => {
     try {
+      if (a.asset_type === 'token') {
+        if (!currentMapId) return toast('Push a map to the table first, then place tokens on it.', 'warn')
+        await api.placeToken({ asset_id: a.id })
+        return toast(`Placed ${a.title} on the table (Table Preview → Tokens to move it)`, 'success')
+      }
       await api.push(a.id)
     } catch (e) {
       toast((e as Error).message, 'error')
@@ -164,7 +169,7 @@ function MapCard({
           onClick={() => onPush(a)}
           className="absolute inset-0 flex items-center justify-center bg-black/50 text-sm font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
         >
-          ⇧ Push to Table
+          {a.asset_type === 'token' ? '◉ Place on Table' : '⇧ Push to Table'}
         </button>
       </div>
       <div className="flex items-center gap-1 px-2.5 py-2">
@@ -177,7 +182,7 @@ function MapCard({
           </div>
         </div>
         <Button variant="primary" className="px-2 py-1 text-xs" onClick={() => onPush(a)}>
-          Push
+          {a.asset_type === 'token' ? 'Place' : 'Push'}
         </Button>
         <Button variant="subtle" className="px-1.5 py-1 text-xs" onClick={() => onRename(a)} title="Rename">
           ✎

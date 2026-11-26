@@ -1,4 +1,4 @@
-import type { AppConfig, Asset, Job, LogEntry } from './types'
+import type { AppConfig, Asset, Job, LogEntry, Token } from './types'
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -32,6 +32,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then((r) => json<Job>(r)),
+  placeToken: (body: { asset_id?: string; name?: string; hidden?: boolean }) =>
+    fetch('/api/table/tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => json<Token>(r)),
   addNote: (text: string) =>
     fetch('/api/session-log', {
       method: 'POST',

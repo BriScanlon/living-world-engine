@@ -171,7 +171,7 @@ def test_tokens_once_per_person_and_portraits_in_the_scene(world, vtt):
     assert "Wenna Tull" in paint_tokens(world, place, day=22)["already"]
     to_table(world, place, day=22)
     wenna = next(p for p in vtt.scenes[-1]["people"] if p["name"] == "Wenna Tull")
-    assert wenna["portrait"].startswith("/media/thumbs/tok-")
+    assert wenna["portrait"].startswith("/media/thumbs/tok-") and wenna["portrait_id"].startswith("tok-")
 
 
 def test_session_log_becomes_the_next_forecast_summary(vtt):

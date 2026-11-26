@@ -102,6 +102,16 @@ class TokenRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=8)
 
 
+class TokenPlace(BaseModel):
+    asset_id: str | None = None
+    name: str | None = Field(default=None, max_length=60)
+    x: float | None = None
+    y: float | None = None
+    size: float | None = None
+    hidden: bool = False
+    color: str | None = None
+
+
 class LogNote(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
@@ -188,6 +198,27 @@ async def push_map(asset_id: str) -> dict:
 @app.post("/api/table/clear")
 async def clear_table() -> dict:
     await svc.table.push_map(None)
+    return {"ok": True}
+
+
+@app.get("/api/table/tokens")
+async def table_tokens() -> dict:
+    """Every token on the current map, hidden ones included (DM view)."""
+    return {"tokens": svc.table.tokens_for("dm")}
+
+
+@app.post("/api/table/tokens")
+async def place_token(body: TokenPlace) -> dict:
+    """Put a token on the current map (at the centre of the view unless x/y are given)."""
+    token = await svc.table.add_token(body.model_dump(exclude_none=True))
+    if not token:
+        raise HTTPException(400, "Not a token in the library, or the map has too many tokens")
+    return token
+
+
+@app.delete("/api/table/tokens")
+async def clear_tokens() -> dict:
+    await svc.table.clear_tokens()
     return {"ok": True}
 
 
@@ -336,6 +367,7 @@ async def websocket(ws: WebSocket) -> None:
     svc.hub.add(ws, role)
     try:
         await svc.hub.send(ws, {"type": "state", "state": svc.table.snapshot()})
+        await svc.hub.send(ws, {"type": "tokens", "tokens": svc.table.tokens_for(role)})
         if role == "dm":
             await svc.hub.send(ws, {"type": "jobs", "jobs": svc.db.list_jobs()})
             await svc.hub.send(ws, {"type": "scene", "scene": svc.table.scene})

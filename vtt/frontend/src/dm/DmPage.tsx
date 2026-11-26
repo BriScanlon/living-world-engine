@@ -63,6 +63,7 @@ export function DmPage() {
             fog={sync.fog}
             fogMeta={sync.fogMeta}
             sendFogOp={sync.sendFogOp}
+            tokens={sync.tokens}
             send={sync.send}
             patch={sync.patch}
             natural={natural}
@@ -88,7 +89,7 @@ export function DmPage() {
       case 'importer':
         return <Importer toast={toast} watchInbox={config?.watchInbox ?? true} />
       case 'world':
-        return <WorldPanel scene={sync.scene} />
+        return <WorldPanel scene={sync.scene} send={sync.send} tokens={sync.tokens} hasMap={!!state.map} />
       case 'sessionLog':
         return <SessionLog entries={sync.log} toast={toast} />
     }

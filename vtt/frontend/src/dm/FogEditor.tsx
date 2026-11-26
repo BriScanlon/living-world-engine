@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { FogCanvas } from '../components/FogCanvas'
 import { GridCanvas } from '../components/GridCanvas'
 import { MapMedia } from '../components/MapMedia'
+import { TokenLayer } from '../components/TokenLayer'
 import type { FogStore } from '../lib/fog'
 import { FEET_PER_SQUARE, effectivePxPerSquare, mapRect, scaleRect, zoomAt, type Size } from '../lib/mapView'
 import type { useTableSync } from '../lib/sync'
 import { useDevicePixelRatio, useElementSize } from '../lib/useElementSize'
-import type { FogMode, FogOp, MapView, TableState } from '../lib/types'
+import type { FogMode, FogOp, MapView, TableState, Token } from '../lib/types'
 import { Button, Panel, Segmented, Slider, Toggle } from './ui'
 
 interface Props {
@@ -14,13 +15,14 @@ interface Props {
   fog: FogStore
   fogMeta: { enabled: boolean; base: 'hidden' | 'revealed'; count: number }
   sendFogOp: (op: FogOp) => void
+  tokens: Token[]
   send: (msg: unknown) => void
   patch: ReturnType<typeof useTableSync>['patch']
   natural: Size | null
   onNatural: (w: number, h: number) => void
 }
 
-type Tool = 'brush' | 'poly' | 'measure' | 'pan'
+type Tool = 'brush' | 'poly' | 'measure' | 'pan' | 'tokens'
 type Pt = [number, number]
 
 /**
@@ -28,7 +30,7 @@ type Pt = [number, number]
  * 1" = 5 ft scale from a known distance, and a Pan tool to slide the map under the grid.
  * Fog and measurements use map-normalised coordinates (0..1 of the image).
  */
-export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural, onNatural }: Props) {
+export function FogEditor({ state, fog, fogMeta, sendFogOp, tokens, send, patch, natural, onNatural }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const { w: width } = useElementSize(wrapRef)
@@ -52,6 +54,10 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
   const [line, setLine] = useState<{ a: Pt; b: Pt } | null>(null)
   const [measured, setMeasured] = useState<{ imagePx: number; feet: string } | null>(null)
   const [dragging, setDragging] = useState(false)
+  // tokens: the one being edited, and where the one being dragged is right now
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null)
+  const tokenDrag = useRef<{ id: string; off: Pt; sentAt: number } | null>(null)
 
   const strokes = useRef<number[]>([])
   const current = useRef<{ count: number; last: Pt } | null>(null)
@@ -156,6 +162,58 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
     })
   }, [mode, sendFogOp, ensureEnabled])
 
+  // ------------------------------------------------------------------ tokens
+  const shownTokens = moving ? tokens.map((t) => (t.id === moving.id ? { ...t, x: moving.x, y: moving.y } : t)) : tokens
+  const selected = tokens.find((t) => t.id === selectedId) ?? null
+  const wrapPt = (e: React.PointerEvent): Pt => {
+    const r = wrapRef.current!.getBoundingClientRect()
+    return [e.clientX - r.left, e.clientY - r.top]
+  }
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
+  useEffect(() => {
+    if (!tokenDrag.current) setMoving(null) // the server's copy has caught up with the drop
+  }, [tokens])
+
+  const onTokenDown = (t: Token, e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* fine without capture */
+    }
+    const [mx, my] = toMap(wrapPt(e))
+    tokenDrag.current = { id: t.id, off: [t.x - mx, t.y - my], sentAt: 0 }
+    setSelectedId(t.id)
+    setMoving({ id: t.id, x: t.x, y: t.y })
+  }
+  const onTokenMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = tokenDrag.current
+    if (!d) return
+    const [mx, my] = toMap(wrapPt(e))
+    const x = clamp01(mx + d.off[0])
+    const y = clamp01(my + d.off[1])
+    setMoving({ id: d.id, x, y })
+    const now = performance.now()
+    if (now - d.sentAt > 60) {
+      d.sentAt = now
+      send({ type: 'token_move', id: d.id, x, y })
+    }
+  }
+  const onTokenUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = tokenDrag.current
+    if (!d) return
+    tokenDrag.current = null
+    const [mx, my] = toMap(wrapPt(e))
+    send({ type: 'token_move', id: d.id, x: clamp01(mx + d.off[0]), y: clamp01(my + d.off[1]) })
+  }
+  const updateToken = (patch: Partial<Token>) => selected && send({ type: 'token_update', id: selected.id, patch })
+  const removeToken = () => {
+    if (!selected) return
+    send({ type: 'token_remove', id: selected.id })
+    setSelectedId(null)
+  }
+
   const onPointerDown = (e: React.PointerEvent) => {
     const pp = previewPt(e)
     const [x, y] = toMap(pp)
@@ -194,6 +252,10 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
       return
     }
     if (pointers.current.size > 1 || pinch.current) return
+    if (tool === 'tokens') {
+      setSelectedId(null)
+      return
+    }
     if (tool === 'poly') {
       if (poly.length >= 3) {
         const [fx, fy] = toPreview(poly[0])
@@ -326,6 +388,10 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
         setMeasured(null)
       }
       if (e.key === 'Enter') finishPoly()
+      if (tool === 'tokens' && (e.key === 'Delete' || e.key === 'Backspace') && selected) {
+        e.preventDefault()
+        removeToken()
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         undo()
@@ -407,13 +473,14 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, dragging, poly, line, tool, mode, rNorm, width, height, dpr, rectP.left, rectP.top, rectP.width, rectP.height, view.pxPerSquare])
 
-  const cursorStyle = dragging ? 'grabbing' : tool === 'pan' ? 'grab' : tool === 'brush' ? 'none' : 'crosshair'
+  const cursorStyle = dragging ? 'grabbing' : tool === 'pan' ? 'grab' : tool === 'brush' ? 'none' : tool === 'tokens' ? 'default' : 'crosshair'
   const hints: Record<Tool, string> = {
     brush: 'Drag to paint fog · Ctrl+Z undoes the last stroke',
     poly: 'Click to add points · click the first point, double-click or Enter to close · Esc / right-click (no drag) cancels',
     measure:
       'Drag across a known distance (e.g. 10 painted squares), then enter its length in feet · on a square grid, start on a painted corner and the map snaps into alignment',
     pan: 'Drag to slide the map under the grid · fog moves with the map',
+    tokens: 'Drag tokens to move them · click one to resize, hide or remove it (Delete) · place portraits from the Library or the World panel',
   }
 
   return (
@@ -426,7 +493,7 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
       }
     >
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="w-[26rem]">
+        <div className="w-[33rem]">
           <Segmented
             value={tool}
             onChange={(t) => {
@@ -442,6 +509,7 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
               { value: 'poly', label: '⬠ Polygon' },
               { value: 'measure', label: '📏 Measure' },
               { value: 'pan', label: '✥ Pan' },
+              { value: 'tokens', label: `◉ Tokens${tokens.length ? ` (${tokens.length})` : ''}` },
             ]}
           />
         </div>
@@ -521,6 +589,20 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
           onDoubleClick={() => tool === 'poly' && finishPoly()}
           onContextMenu={(e) => e.preventDefault()}
         />
+        {state.map && (
+          <TokenLayer
+            tokens={shownTokens}
+            rect={rectP}
+            natural={natural}
+            pxPerSquare={view.pxPerSquare}
+            dm
+            interactive={tool === 'tokens'}
+            selectedId={tool === 'tokens' ? selectedId : null}
+            onTokenPointerDown={onTokenDown}
+            onTokenPointerMove={onTokenMove}
+            onTokenPointerUp={onTokenUp}
+          />
+        )}
         {state.map && natural && (
           <div className="absolute top-2 right-2 flex flex-col items-stretch gap-1 rounded-lg bg-black/75 p-1 shadow-lg ring-1 ring-white/15">
             <ZoomButton label="+" title="Zoom map in (Shift = fine)" onClick={(fine) => zoomBy(fine ? 1.01 : 1.1)} />
@@ -550,6 +632,59 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, send, patch, natural
           </div>
         )}
       </div>
+
+      {tool === 'tokens' && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-800/70 px-3 py-2 text-sm ring-1 ring-white/10">
+          {selected ? (
+            <>
+              <input
+                key={selected.id}
+                defaultValue={selected.name}
+                maxLength={60}
+                onBlur={(e) => e.target.value.trim() && e.target.value !== selected.name && updateToken({ name: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                className="w-40 rounded bg-slate-900 px-2 py-1 ring-1 ring-white/10 outline-none focus:ring-amber-400/60"
+              />
+              <div className="w-64">
+                <Segmented
+                  value={String(selected.size)}
+                  onChange={(v) => updateToken({ size: Number(v) })}
+                  options={[
+                    { value: '0.5', label: '½' },
+                    { value: '1', label: '1' },
+                    { value: '2', label: '2' },
+                    { value: '3', label: '3' },
+                    { value: '4', label: '4' },
+                    { value: '6', label: '6' },
+                  ]}
+                />
+              </div>
+              <span className="text-xs text-slate-400">squares</span>
+              <div className="w-44">
+                <Toggle label="Hidden from players" checked={selected.hidden} onChange={(v) => updateToken({ hidden: v })} />
+              </div>
+              <Button variant="danger" className="!py-1" onClick={removeToken}>Remove</Button>
+            </>
+          ) : (
+            <span className="text-slate-400">
+              {tokens.length ? 'Click a token to edit it, or drag it to move it.' : 'No tokens on this map yet.'}
+            </span>
+          )}
+          <div className="ml-auto flex gap-2">
+            <Button className="!py-1" disabled={!state.map} onClick={() => send({ type: 'token_add', token: { name: 'Marker' } })}>
+              + Marker
+            </Button>
+            <Button
+              variant="subtle"
+              className="!py-1"
+              disabled={!tokens.length}
+              onClick={() => confirm('Remove every token from this map?') && send({ type: 'tokens_clear' })}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1">
         <div className="w-48">

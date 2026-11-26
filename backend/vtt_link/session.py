@@ -118,13 +118,13 @@ def _portrait_brief(w, c: dict[str, Any]) -> str:
     return text[:600]
 
 
-def portraits() -> dict[str, str]:
-    """Character id -> VTT media URL of its newest portrait token."""
-    out: dict[str, str] = {}
+def portraits() -> dict[str, dict[str, str]]:
+    """Character id -> its newest portrait token on the VTT: ``{"id": asset id, "url": thumbnail URL}``."""
+    out: dict[str, dict[str, str]] = {}
     for t in sorted(client.tokens(), key=lambda t: t.get("created_at") or 0):
         cid = _tag(t.get("tags") or [], TAG)
         if cid and (t.get("thumb_url") or t.get("media_url")):
-            out[cid] = t.get("thumb_url") or t["media_url"]
+            out[cid] = {"id": t["id"], "url": t.get("thumb_url") or t["media_url"]}
     return out
 
 
