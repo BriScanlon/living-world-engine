@@ -79,6 +79,9 @@ def default_view(asset: dict[str, Any] | None) -> dict[str, Any]:
         # Known 140 ft-wide paintings: true scale out of the box.
         return {"mode": "scale", "pxPerSquare": round(width / AI_MAP_SQUARES_ACROSS, 3), "cx": 0.5, "cy": 0.5}
     guess = round(width / AI_MAP_SQUARES_ACROSS, 3) if width else 100.0
+    if asset and any(str(t).startswith("lwe-overland") for t in asset.get("tags") or []):
+        # The world engine's overland map of what the party knows: show all of it, not a crop.
+        return {"mode": "contain", "pxPerSquare": guess, "cx": 0.5, "cy": 0.5}
     return {"mode": "cover", "pxPerSquare": guess, "cx": 0.5, "cy": 0.5}
 
 

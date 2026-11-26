@@ -285,6 +285,7 @@ async def upload(
     mode: str = Form("display"),      # display | animate
     push: bool = Form(False),
     title: str = Form(""),
+    tags: str = Form(""),             # comma-separated, e.g. "lwe-overland:living_world" from the world engine
 ) -> dict:
     name = Path(file.filename or "upload.png").name
     ext = Path(name).suffix.lower()
@@ -301,7 +302,8 @@ async def upload(
         job = await svc.jobs.submit("animate", {"path": str(dest), "source": "imported", "title": stem_title, "push": push})
         return {"queued": True, "job": job}
 
-    asset = await asyncio.to_thread(flows.import_static, svc.db, file_path=dest, title=stem_title)
+    tag_list = [t.strip()[:120] for t in tags.split(",") if t.strip()][:8]
+    asset = await asyncio.to_thread(flows.import_static, svc.db, file_path=dest, title=stem_title, tags=tag_list)
     await svc.hub.broadcast({"type": "asset_added", "asset": asset}, role="dm")
     if push:
         await svc.table.push_map(asset)

@@ -106,3 +106,8 @@ export function useNaturalSize(map: Asset | null): [Size | null, (w: number, h: 
   if (map.width && map.height) return [{ w: map.width, h: map.height }, onNatural]
   return [measured && measured.id === map.id ? { w: measured.w, h: measured.h } : null, onNatural]
 }
+
+/** The world engine's overland map of what the party knows: no 5 ft battle grid on it. */
+export function isOverland(map: Asset | null | undefined) {
+  return !!map?.tags?.some((t) => t.startsWith('lwe-overland'))
+}

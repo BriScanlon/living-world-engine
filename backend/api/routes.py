@@ -245,10 +245,45 @@ class PartyMarkBody(BaseModel):
 def party_knowledge(body: PartyMarkBody) -> dict[str, Any]:
     """Mark what the party knows of a place from a day: been there, heard of it, or (from now) unknown."""
     from atlas.party import mark
+    from atlas.party_map import refresh_if_shown
     try:
-        return mark(_store(), body.place, body.state, branch=body.branch, day=body.day)
+        out = mark(_store(), body.place, body.state, branch=body.branch, day=body.day)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    # if the players are looking at the party's map, redraw it with what they now know
+    out["table_refreshed"] = bool(out.get("changed")) and refresh_if_shown(_store(), body.branch, out["day"])
+    return out
+
+
+@router.get("/party/map.webp")
+def party_map_image(branch: str = MAIN, day: int | None = None):
+    """The party's overland map: the atlas as the party knows it, fogged, as an image."""
+    from fastapi.responses import Response
+
+    from atlas.party_map import NothingKnown, render
+    try:
+        data, _ = render(_store(), branch, day)
+    except NothingKnown as e:
+        raise HTTPException(404, str(e)) from e
+    return Response(data, media_type="image/webp", headers={"Cache-Control": "no-store"})
+
+
+class PartyMapBody(BaseModel):
+    branch: str = MAIN
+    day: int | None = None
+
+
+@router.post("/party/map-to-table")
+def party_map_to_table(body: PartyMapBody) -> dict[str, Any]:
+    """Put the party's overland map on the table (it redraws itself while it is there and the party learns more)."""
+    from atlas.party_map import NothingKnown, to_table
+    from vtt_link import client
+    try:
+        return to_table(_store(), body.branch, body.day)
+    except NothingKnown as e:
+        raise HTTPException(400, str(e)) from e
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
 
 
 @router.get("/atlas/files/{slug}/{name}")

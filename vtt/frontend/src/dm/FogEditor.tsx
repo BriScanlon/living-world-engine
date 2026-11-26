@@ -4,7 +4,7 @@ import { GridCanvas } from '../components/GridCanvas'
 import { MapMedia } from '../components/MapMedia'
 import { TokenLayer } from '../components/TokenLayer'
 import type { FogStore } from '../lib/fog'
-import { FEET_PER_SQUARE, effectivePxPerSquare, mapRect, scaleRect, zoomAt, type Size } from '../lib/mapView'
+import { FEET_PER_SQUARE, effectivePxPerSquare, isOverland, mapRect, scaleRect, zoomAt, type Size } from '../lib/mapView'
 import type { useTableSync } from '../lib/sync'
 import { useDevicePixelRatio, useElementSize } from '../lib/useElementSize'
 import type { FogMode, FogOp, MapView, TableState, Token } from '../lib/types'
@@ -575,7 +575,7 @@ export function FogEditor({ state, fog, fogMeta, sendFogOp, tokens, send, patch,
         {state.map && (
           <MapMedia map={state.map} rect={rectP} playbackRate={state.display.playbackRate} preferStill onNaturalSize={onNatural} />
         )}
-        {showGrid && <GridCanvas grid={state.grid} hexPx={hexPx} table={tv} width={width} height={height} dpr={dpr} />}
+        {showGrid && !isOverland(state.map) && <GridCanvas grid={state.grid} hexPx={hexPx} table={tv} width={width} height={height} dpr={dpr} />}
         <FogCanvas store={fog} enabled={fogMeta.enabled} rect={rectP} resolution={dpr} color="#0b1020" opacity={0.62} />
         <canvas
           ref={overlayRef}

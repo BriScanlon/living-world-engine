@@ -4,7 +4,7 @@ import { FxCanvas } from '../components/FxCanvas'
 import { GridCanvas } from '../components/GridCanvas'
 import { MapMedia } from '../components/MapMedia'
 import { TokenLayer } from '../components/TokenLayer'
-import { DEFAULT_VIEW, mapRect, useNaturalSize } from '../lib/mapView'
+import { DEFAULT_VIEW, isOverland, mapRect, useNaturalSize } from '../lib/mapView'
 import { useTableSync } from '../lib/sync'
 import { useDevicePixelRatio, useElementSize } from '../lib/useElementSize'
 import { CalibrationOverlay } from './CalibrationOverlay'
@@ -95,7 +95,7 @@ export function TablePage() {
 
       {state && <FxCanvas fx={state.fx} width={size.w} height={size.h} />}
 
-      {state && (
+      {state && !isOverland(state.map) && (
         <GridCanvas grid={state.grid} hexPx={hexPx} table={table} width={size.w} height={size.h} dpr={dpr} />
       )}
 
