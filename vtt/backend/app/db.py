@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS fog (
     value  TEXT NOT NULL
 );
 
+-- tokens on each map: [{id, name, asset_id, x, y, size, hidden, color}]
+CREATE TABLE IF NOT EXISTS tokens (
+    map_id TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
+
 -- what happened at the table, in order: DM notes plus maps shown and world scenes visited
 CREATE TABLE IF NOT EXISTS session_log (
     id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +149,7 @@ class Database:
         self._exec("DELETE FROM assets WHERE id = ?", (asset_id,))
         self._exec("DELETE FROM fog WHERE map_id = ?", (asset_id,))
         self._exec("DELETE FROM map_view WHERE map_id = ?", (asset_id,))
+        self._exec("DELETE FROM tokens WHERE map_id = ?", (asset_id,))
 
     # -------------------------------------------------------------- settings
     def get_setting(self, key: str, default: Any = None) -> Any:
@@ -166,6 +173,18 @@ class Database:
             "INSERT INTO fog (map_id, value) VALUES (?, ?) "
             "ON CONFLICT(map_id) DO UPDATE SET value = excluded.value",
             (map_id, json.dumps(fog, separators=(",", ":"))),
+        )
+
+    # ---------------------------------------------------------------- tokens
+    def get_tokens(self, map_id: str) -> list | None:
+        row = self._one("SELECT value FROM tokens WHERE map_id = ?", (map_id,))
+        return json.loads(row["value"]) if row else None
+
+    def set_tokens(self, map_id: str, tokens: list) -> None:
+        self._exec(
+            "INSERT INTO tokens (map_id, value) VALUES (?, ?) "
+            "ON CONFLICT(map_id) DO UPDATE SET value = excluded.value",
+            (map_id, json.dumps(tokens, separators=(",", ":"))),
         )
 
     # -------------------------------------------------------------- map view

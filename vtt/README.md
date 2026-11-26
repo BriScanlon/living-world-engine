@@ -167,10 +167,25 @@ The world engine drives the VTT over its REST API (server to server; the VTT nev
 | POST | `/api/tokens` | `{name, description, tags}`: paint a round portrait token |
 | GET | `/api/jobs/{id}` | one job's progress and result |
 | GET · POST · DELETE | `/api/session-log` (`DELETE /api/session-log/{id}` for one entry) | the session log |
+| GET · POST · DELETE | `/api/table/tokens` | tokens on the current map: list (hidden ones too), place `{asset_id?, name?, x?, y?, size?, hidden?}`, clear |
 
 The **Session Log** panel on `/dm` records every map pushed and scene opened automatically; type notes as play goes.
 *New session* clears it, so pull it into the world engine's Session Forecaster (*From the table*) first.
 Scenes and the log are only ever sent to `dm` sockets.
+
+---
+
+## Tokens
+
+Portraits and markers sit on the map, above the grid and below the fog, so fogged areas hide them too.
+
+* **Place** a token from the Library's *Tokens* tab, from the World panel (a scene's people with portraits), or with
+  *+ Marker* for a plain coloured disc.
+* In **Table Preview → ◉ Tokens**, drag tokens to move them; click one to rename it, set its size (½ to 6 squares),
+  hide it from players or remove it (Delete key).
+* Positions are stored per map in map-image coordinates, like fog, so tokens stay put when you rescale or pan, and
+  each map keeps its own tokens. A size of 1 is one calibrated inch on the table at true scale.
+* **Hidden tokens never reach the table**: tokens travel in their own `tokens` message, filtered per role.
 
 ---
 
@@ -231,7 +246,8 @@ backend/
     main.py        FastAPI app: REST, /ws, /media, SPA
     state.py       live table state, per-map fog of war, settings persistence
     hub.py         WebSocket fan-out (table / dm roles)
-    db.py          SQLite: assets, settings, jobs, fog, session log
+    db.py          SQLite: assets, settings, jobs, fog, tokens, session log
+    tokens.py      token validation, per-role visibility
     watcher.py     watchdog inbox watcher
     media.py       thumbnails + procedural mock maps/tokens
     pipeline/
@@ -243,7 +259,7 @@ backend/
 frontend/src/
   table/           /table page + calibration ruler
   dm/              /dm panels (fog editor, controls, generator, importer, jobs, library, world, session log)
-  components/      shared canvas layers (map media, FX, grid, fog)
+  components/      shared layers (map media, FX, grid, tokens, fog)
   lib/             hex math, fog store/renderer, FX engine, WebSocket sync
 workflows/         ComfyUI API workflows (Flux, Wan 2.1 FLF2V) with documented node IDs
 scripts/           starter pack seeder + manifest
@@ -251,9 +267,9 @@ scripts/           starter pack seeder + manifest
 
 ### WebSocket protocol (`/ws?role=table|dm`)
 
-- **Server → client:** `state` (full snapshot on connect), `state_part {key, value}`, `fog_op`, `fog_full`, `fog_meta`, `job`, `jobs`, `asset_added`, `library_changed`, `toast`; DM only: `scene`, `log_full {entries}`, `log_entry {entry}`
+- **Server → client:** `state` (full snapshot on connect), `state_part {key, value}`, `fog_op`, `fog_full`, `fog_meta`, `job`, `jobs`, `asset_added`, `library_changed`, `toast`, `tokens {tokens}` (the table's copy leaves out hidden ones); DM only: `scene`, `log_full {entries}`, `log_entry {entry}`
 - **Table → server:** `viewport {w, h, dpr}`, which drives DM preview geometry and brush sizes in inches
-- **DM → server:** `grid` / `display` / `fx` / `view` `{patch}`, `calibration {patch | nudge}`, `fog_op`, `fog_reset {base}`, `fog_enabled`, `fog_undo {count}`
+- **DM → server:** `grid` / `display` / `fx` / `view` `{patch}`, `calibration {patch | nudge}`, `fog_op`, `fog_reset {base}`, `fog_enabled`, `fog_undo {count}`, `token_add {token}`, `token_move {id, x, y}`, `token_update {id, patch}`, `token_remove {id}`, `tokens_clear`
 
 `view` is the current map's placement: `{mode: cover|contain|scale, pxPerSquare, cx, cy}`. It is
 stored per map. Fog ops use coordinates normalised to the map image, so the same op list renders

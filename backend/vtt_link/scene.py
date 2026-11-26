@@ -196,7 +196,8 @@ def to_table(store: GraphStore, place_id: str, branch: str = "main", day: int | 
     except client.VTTError:
         faces = {}
     for p in scene["people"]:
-        p["portrait"] = faces.get(p["id"])
+        face = faces.get(p["id"]) or {}
+        p["portrait"], p["portrait_id"] = face.get("url"), face.get("id")  # the id lets the DM place the token
     client.send_scene(scene)
     return {"map": chosen, "scene": {"place": scene["place"]["name"], "people": len(scene["people"]),
                                      "rumors": len(scene["rumors"]), "creatures": len(scene["creatures"])}}

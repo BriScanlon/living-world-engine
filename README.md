@@ -243,7 +243,8 @@ link off). The link is push-only, so the VTT never needs to know about TerminusD
   the players' table). You can edit the brief before the VTT paints it, and the finished map is linked from that day,
   so the map of a burned warehouse replaces the old one only from the day it burned.
 * **Portrait tokens.** *Portraits* asks the VTT for a round top-down token for each person at the place who hasn't
-  got one (tagged with their character id); the World panel shows them next to each name.
+  got one (tagged with their character id); the World panel shows them next to each name, with **◉ Place** (or
+  *Put everyone on the table*) to drop them onto the map, where the DM moves them with the preview's Tokens tool.
 * **The session loop.** The VTT keeps a session log: DM notes typed during play, plus every map shown and scene
   opened. *From the table* in the Session Forecaster turns it into the summary and sets the session's days.
 

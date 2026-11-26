@@ -3,6 +3,7 @@ import { FogCanvas } from '../components/FogCanvas'
 import { FxCanvas } from '../components/FxCanvas'
 import { GridCanvas } from '../components/GridCanvas'
 import { MapMedia } from '../components/MapMedia'
+import { TokenLayer } from '../components/TokenLayer'
 import { DEFAULT_VIEW, mapRect, useNaturalSize } from '../lib/mapView'
 import { useTableSync } from '../lib/sync'
 import { useDevicePixelRatio, useElementSize } from '../lib/useElementSize'
@@ -15,11 +16,12 @@ const CURSOR_HIDE_MS = 2500
  *   Layer 1  map media (looping video / 4K still)
  *   Layer 2  ambient FX canvas
  *   Layer 3  calibrated 1" grid
- *   Layer 4  fog of war
+ *   Layer 4  tokens (hidden ones never reach this page)
+ *   Layer 5  fog of war
  *   (top)    calibration ruler when enabled from /dm
  */
 export function TablePage() {
-  const { state, connected, send, fog, fogMeta } = useTableSync('table')
+  const { state, connected, send, fog, fogMeta, tokens } = useTableSync('table')
   const rootRef = useRef<HTMLDivElement>(null)
   const size = useElementSize(rootRef)
   const dpr = useDevicePixelRatio()
@@ -95,6 +97,10 @@ export function TablePage() {
 
       {state && (
         <GridCanvas grid={state.grid} hexPx={hexPx} table={table} width={size.w} height={size.h} dpr={dpr} />
+      )}
+
+      {state?.map && (
+        <TokenLayer tokens={tokens} rect={rect} natural={natural} pxPerSquare={state.view.pxPerSquare} />
       )}
 
       <FogCanvas

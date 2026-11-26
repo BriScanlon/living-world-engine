@@ -85,6 +85,19 @@ export interface TableViewport {
   dpr: number
 }
 
+/** A token on the current map. x/y are 0..1 of the map image; size is in 5 ft squares. */
+export interface Token {
+  id: string
+  name: string
+  asset_id: string | null
+  img: string | null
+  x: number
+  y: number
+  size: number
+  hidden: boolean
+  color: string
+}
+
 export interface TableState {
   map: Asset | null
   display: DisplaySettings
@@ -126,6 +139,7 @@ export interface ScenePerson {
   id?: string
   name: string
   portrait?: string | null
+  portrait_id?: string | null
   role?: string | null
   species?: string | null
   char_class?: string | null

@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from . import tokens as tk
 from .db import Database
 from .hub import Hub
 
@@ -154,6 +155,10 @@ class TableService:
         self.state = default_state(default_hex_px)
         self._fog_save_task: asyncio.Task | None = None
         self._view_save_task: asyncio.Task | None = None
+        self._tokens_save_task: asyncio.Task | None = None
+        # Tokens on the current map. Hidden ones are DM-only, so tokens travel in their own
+        # per-role "tokens" message rather than in the shared table snapshot.
+        self.tokens: list[dict[str, Any]] = []
         # World context pushed by the Living World Engine for the place on the table.
         # DM-only: never part of the table snapshot, so players' screens never receive it.
         self.scene: dict[str, Any] | None = None
@@ -170,6 +175,7 @@ class TableService:
             self.state["map"] = self.db.get_asset(map_id)
         self.state["fog"] = self._load_fog(self._map_key())
         self.state["view"] = self._load_view(self.state["map"])
+        self.tokens = tk.load(self.db.get_tokens(self._map_key()), self.db.get_asset)
         scene = self.db.get_setting("scene")
         self.scene = scene if isinstance(scene, dict) else None
 
@@ -246,9 +252,49 @@ class TableService:
 
         self._fog_save_task = asyncio.create_task(_later())
 
+    def _save_tokens_now(self) -> None:
+        self.db.set_tokens(self._map_key(), tk.stored(self.tokens))
+
+    def _schedule_tokens_save(self) -> None:
+        if self._tokens_save_task and not self._tokens_save_task.done():
+            return
+
+        async def _later() -> None:
+            await asyncio.sleep(1.0)
+            self._save_tokens_now()
+
+        self._tokens_save_task = asyncio.create_task(_later())
+
     def flush(self) -> None:
         self._save_fog_now()
         self._save_view_now()
+        self._save_tokens_now()
+
+    # ----------------------------------------------------------------- tokens
+    def tokens_for(self, role: str) -> list[dict[str, Any]]:
+        return copy.deepcopy(self.tokens if role == "dm" else tk.visible(self.tokens))
+
+    async def broadcast_tokens(self) -> None:
+        await self.hub.broadcast({"type": "tokens", "tokens": self.tokens_for("dm")}, role="dm")
+        await self.hub.broadcast({"type": "tokens", "tokens": self.tokens_for("table")}, role="table")
+
+    async def add_token(self, raw: Any) -> dict[str, Any] | None:
+        if len(self.tokens) >= tk.MAX_TOKENS:
+            return None
+        view = self.state["view"]
+        centre = (min(1.0, max(0.0, view.get("cx", 0.5))), min(1.0, max(0.0, view.get("cy", 0.5))))
+        token = tk.new_token(raw, count=len(self.tokens), asset_lookup=self.db.get_asset, centre=centre)
+        if not token:
+            return None
+        self.tokens.append(token)
+        self._save_tokens_now()
+        await self.broadcast_tokens()
+        return token
+
+    async def clear_tokens(self) -> None:
+        self.tokens = []
+        self._save_tokens_now()
+        await self.broadcast_tokens()
 
     # ------------------------------------------------------------------ API
     def snapshot(self) -> dict[str, Any]:
@@ -267,9 +313,10 @@ class TableService:
         await self.hub.broadcast({"type": "state_part", "key": "clients", "value": self.hub.counts()})
 
     async def push_map(self, asset: dict[str, Any] | None) -> None:
-        """Show a map on the table (or clear it with None). Swaps in that map's fog."""
+        """Show a map on the table (or clear it with None). Swaps in that map's fog and tokens."""
         self._save_fog_now()
         self._save_view_now()
+        self._save_tokens_now()
         self.state["map"] = asset
         self.db.set_setting("current_map_id", asset["id"] if asset else None)
         self.state["fog"] = self._load_fog(self._map_key())
@@ -277,10 +324,16 @@ class TableService:
         await self.set_part("view")
         await self.set_part("map")
         await self.hub.broadcast({"type": "fog_full", "fog": self.state["fog"]})
+        self.tokens = tk.load(self.db.get_tokens(self._map_key()), self.db.get_asset)
+        await self.broadcast_tokens()
         if asset:
             await self.log("map", f"Map on the table: {asset.get('title')}", {"map_id": asset["id"]})
 
     async def asset_deleted(self, asset_id: str) -> None:
+        if any(t.get("asset_id") == asset_id for t in self.tokens):
+            self.tokens = [tk.with_image(t, self.db.get_asset) for t in self.tokens]
+            self._save_tokens_now()
+            await self.broadcast_tokens()
         if self.state.get("map") and self.state["map"]["id"] == asset_id:
             self.state["map"] = None
             self.db.set_setting("current_map_id", None)
@@ -289,6 +342,8 @@ class TableService:
             await self.set_part("view")
             await self.set_part("map")
             await self.hub.broadcast({"type": "fog_full", "fog": self.state["fog"]})
+            self.tokens = tk.load(self.db.get_tokens(NO_MAP), self.db.get_asset)
+            await self.broadcast_tokens()
 
     async def handle(self, ws: WebSocket, role: str, msg: dict[str, Any]) -> None:
         kind = msg.get("type")
@@ -359,6 +414,25 @@ class TableService:
             self.state["fog"]["enabled"] = bool(msg.get("enabled"))
             self._save_fog_now()
             await self.hub.broadcast({"type": "fog_meta", "enabled": self.state["fog"]["enabled"]})
+        elif kind == "token_add":
+            if not await self.add_token(msg.get("token")):
+                await self.hub.send(ws, {"type": "toast", "level": "warn", "message": "Couldn't add that token."})
+        elif kind in ("token_move", "token_update"):
+            tid = msg.get("id")
+            patch = tk.clean_patch(msg.get("patch") if kind == "token_update" else {"x": msg.get("x"), "y": msg.get("y")})
+            token = next((t for t in self.tokens if t["id"] == tid), None)
+            if token and patch:
+                token.update(patch)
+                self._schedule_tokens_save()
+                await self.broadcast_tokens()
+        elif kind == "token_remove":
+            before = len(self.tokens)
+            self.tokens = [t for t in self.tokens if t["id"] != msg.get("id")]
+            if len(self.tokens) != before:
+                self._save_tokens_now()
+                await self.broadcast_tokens()
+        elif kind == "tokens_clear":
+            await self.clear_tokens()
         elif kind == "fog_undo":
             ops = self.state["fog"]["ops"]
             n = int(_clamp(msg.get("count", 1), 1, len(ops) or 1))
