@@ -229,6 +229,7 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
         "provinces": provinces,
         "places": fc(places), "events": fc(events), "rumors": fc(rumors),
         "changed_provinces": sum(p["changed"] for p in provinces.values()),
+        "maps": _footprints(w),
     }
 
 
@@ -258,4 +259,13 @@ def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int 
                    for r in w.of_type("Rumor") if r.get("location") in inside][:8],
         "places": [{"id": l["@id"], "name": l["name"], "kind": l.get("location_type")} for l in w.of_type("Location")
                    if l["@id"] in inside and l["@id"] != doc_id][:20],
+        "maps": [{"id": m["@id"], "name": m["name"], "kind": m.get("kind"), "vtt_map_id": m["vtt_map_id"],
+                  "from_day": m.get("in_world_start"),
+                  "thumb": f"/api/vtt/media/{m['thumb_path']}" if m.get("thumb_path") else None}
+                 for m in w.of_type("Map") if m.get("place") == doc_id],
     }
+
+
+def _footprints(w: WorldView) -> list[dict[str, Any]]:
+    from vtt_link.scene import footprints
+    return footprints(w)

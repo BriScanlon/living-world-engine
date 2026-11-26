@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap, Marker } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, Branch, PlaceDetail } from "../api";
+import { api, AtlasState, Branch, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -27,6 +27,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const markers = useRef<Marker[]>([]);
   const loadedSlug = useRef<string | null>(null);
   const openRef = useRef<(id: string) => void>(() => undefined);
+  const footprintIds = useRef<string[]>([]);
   const [ready, setReady] = useState(false);
   const [branch, setBranch] = useState("main");
   const [compare, setCompare] = useState(true);
@@ -93,6 +94,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       map.remove();
       mapRef.current = null;
       loadedSlug.current = null; // a new map needs its layers added again
+      footprintIds.current = [];
       setReady(false);
     };
   }, []);
@@ -156,6 +158,11 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     map.addSource("places", { type: "geojson", data: empty });
     map.addSource("events", { type: "geojson", data: empty });
     map.addSource("rumors", { type: "geojson", data: empty });
+    map.addSource("footprints", { type: "geojson", data: empty });
+    map.addLayer({
+      id: "footprint-line", type: "line", source: "footprints", minzoom: 11,
+      paint: { "line-color": "#f5c77e", "line-width": 1.5, "line-dasharray": [2, 1] },
+    });
     map.addLayer({
       id: "places", type: "circle", source: "places",
       paint: {
@@ -213,6 +220,29 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     const evs = showSecret ? state.events : { ...state.events, features: state.events.features.filter((f) => f.properties?.visibility !== "secret") };
     (map.getSource("events") as GeoJSONSource).setData(evs);
     (map.getSource("rumors") as GeoJSONSource).setData(state.rumors);
+    // Linked VTT battle maps, drawn at true scale (visible once zoomed into a town)
+    const fps = state.maps ?? [];
+    (map.getSource("footprints") as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: fps.map((f) => ({ type: "Feature", properties: { id: f.id, name: f.name },
+        geometry: { type: "Polygon", coordinates: [[...f.corners, f.corners[0]]] } })),
+    });
+    for (const old of footprintIds.current) {
+      if (!fps.some((f) => `fp-${f.id}` === old)) {
+        if (map.getLayer(old)) map.removeLayer(old);
+        if (map.getSource(old)) map.removeSource(old);
+      }
+    }
+    footprintIds.current = [];
+    for (const f of fps) {
+      if (!f.thumb_path) continue;
+      const sid = `fp-${f.id}`;
+      footprintIds.current.push(sid);
+      if (map.getSource(sid)) continue;
+      map.addSource(sid, { type: "image", url: `${location.origin}/api/vtt/media/${f.thumb_path}`,
+        coordinates: f.corners as [[number, number], [number, number], [number, number], [number, number]] });
+      map.addLayer({ id: sid, type: "raster", source: sid, minzoom: 11, paint: { "raster-opacity": 0.92 } }, "footprint-line");
+    }
     // HTML labels (no glyph server needed): capitals and the campaign's own places
     markers.current.forEach((m) => m.remove());
     markers.current = state.places.features
@@ -312,6 +342,10 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
               ))}</Section>}
               {!!detail.places.length && <Section title="Places">{detail.places.map((p) => <li key={p.id}><button className="text-ember-300 hover:underline" onClick={() => openDetail(p.id)}>{p.name}</button> <span className="text-ink-400">{p.kind}</span></li>)}</Section>}
               {!!detail.events.length && <Section title="What happened">{detail.events.map((e) => <li key={e.id}><span className="font-mono text-xs text-ink-400">d{e.day}</span> {e.title}</li>)}</Section>}
+              {detail.type === "Location" && (
+                <TableLink detail={detail} branch={branch} day={day}
+                  onChanged={() => { openDetail(detail.id); load(); }} />
+              )}
               {!!detail.rumors.length && <Section title="Rumors heard here">{detail.rumors.map((r, i) => <li key={i} className="italic">{r.dialogue} <Badge tone={accuracyTone(r.accuracy)}>{r.accuracy}</Badge></li>)}</Section>}
             </Card>
           ) : (
@@ -384,4 +418,87 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function escape(s: string) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+
+/** Link a VTT battle map to this place and put it on the table (with the scene on the VTT's DM screen). */
+function TableLink({ detail, branch, day, onChanged }: { detail: PlaceDetail; branch: string; day: number | null; onChanged: () => void }) {
+  const [status, setStatus] = useState<{ configured: boolean; reachable: boolean; error?: string } | null>(null);
+  const [library, setLibrary] = useState<VttMap[] | null>(null);
+  const [pick, setPick] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.vttStatus().then(setStatus).catch(() => setStatus({ configured: false, reachable: false }));
+  }, []);
+
+  const run = async (label: string, fn: () => Promise<string | void>) => {
+    setBusy(label); setErr(null); setNote(null);
+    try {
+      const msg = await fn();
+      if (msg) setNote(msg);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const maps = detail.maps ?? [];
+  if (status && !status.reachable) {
+    return (
+      <Section title="On the table (VTT)">
+        <li className="text-xs text-ink-400">{status.configured ? `The VTT isn't reachable: ${status.error ?? ""}` : "No VTT linked. Set VTT_URL (docker compose does this for you)."}</li>
+      </Section>
+    );
+  }
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-400">On the table (VTT)</div>
+      <ul className="space-y-2">
+        {maps.map((m) => (
+          <li key={m.id} className="flex items-center gap-2 rounded-lg border border-ink-800 p-1.5">
+            {m.thumb ? <img src={m.thumb} alt="" className="h-10 w-16 rounded object-cover" /> : <div className="h-10 w-16 rounded bg-ink-800" />}
+            <div className="min-w-0 flex-1 text-sm">
+              <div className="truncate text-ink-100">{m.name}</div>
+              <div className="text-xs text-ink-400">{m.kind} map · from day {m.from_day}</div>
+            </div>
+            <Button variant="primary" disabled={!!busy} onClick={() => run("show", async () => {
+              const r = await api.toTable(detail.id, { branch, day, map_doc_id: m.id });
+              return `On the table: ${r.map?.name ?? detail.name}. Scene sent (${plural(r.scene.people, "person", "people")}, ${plural(r.scene.rumors, "rumor")}).`;
+            })}>{busy === "show" ? <Spinner /> : "▶"} Show</Button>
+            <Button variant="ghost" disabled={!!busy} title="Unlink from this day on" onClick={() => run("unlink", async () => {
+              await api.unlinkMap(m.id, branch, day); onChanged(); return "Unlinked.";
+            })}>✕</Button>
+          </li>
+        ))}
+      </ul>
+      {!maps.length && (
+        <Button className="mt-1" disabled={!!busy} onClick={() => run("scene", async () => {
+          const r = await api.toTable(detail.id, { branch, day });
+          return `Scene sent to the VTT's DM screen (${plural(r.scene.people, "person", "people")}, ${plural(r.scene.rumors, "rumor")}). Link a map to show it on the table too.`;
+        })}>{busy === "scene" ? <Spinner /> : "↗"} Send scene to the VTT</Button>
+      )}
+      <div className="mt-2 flex gap-1.5">
+        <select className={cx(inputCls, "py-1 text-xs")} value={pick}
+          onFocus={() => !library && api.vttMaps().then(setLibrary).catch((e) => setErr(e.message))}
+          onChange={(e) => setPick(e.target.value)}>
+          <option value="">{library ? "Link a VTT map…" : "Link a VTT map… (loading library)"}</option>
+          {library?.map((m) => <option key={m.id} value={m.id}>{m.title}{m.source ? ` (${m.source})` : ""}</option>)}
+        </select>
+        <Button disabled={!pick || !!busy} onClick={() => run("link", async () => {
+          await api.linkMap(detail.id, { vtt_map_id: pick, branch, day });
+          setPick(""); onChanged();
+          return `Linked from day ${day ?? "now"}.`;
+        })}>{busy === "link" ? <Spinner /> : "Link"}</Button>
+      </div>
+      {note && <p className="mt-1.5 text-xs text-emerald-300">{note}</p>}
+      {err && <p className="mt-1.5 text-xs text-rose-300">{err}</p>}
+    </div>
+  );
+}
+
+function plural(n: number, one: string, many = `${one}s`) {
+  return `${n} ${n === 1 ? one : many}`;
 }

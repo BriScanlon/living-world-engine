@@ -30,7 +30,7 @@ from typing import Any
 NODE_TYPES = ["Character", "Faction", "Location", "Province", "Item", "Monster", "Event", "Rumor", "Goal"]
 AGENT_TYPES = ["Character", "Faction"]
 EDGE_TYPES = ["DesireEdge", "ControlEdge", "RelationshipEdge", "EpistemicEdge"]
-META_TYPES = ["ForecastRun", "Alias", "WorldAtlas"]
+META_TYPES = ["ForecastRun", "Alias", "WorldAtlas", "Map"]
 
 DESIRE_KINDS = ["WANTS", "NEEDS", "FEARS"]
 CONTROL_KINDS = ["CONTROLS", "OWNS"]
@@ -264,6 +264,25 @@ SCHEMA: list[dict[str, Any]] = [
     },
     {
         "@type": "Class",
+        "@id": "Map",
+        "@inherits": ["Entity"],
+        "@key": _LEX_UID,
+        "@documentation": {"@comment": "A virtual-tabletop map linked to a place. Bi-temporal: a new version (say, after "
+                                       "the warehouse burns) starts on its day and the old one ends."},
+        "place": "Location",
+        "kind": _opt("xsd:string"),  # battle | building | town | region
+        "vtt_map_id": "xsd:string",
+        "width_px": _opt("xsd:integer"),
+        "height_px": _opt("xsd:integer"),
+        "metres_per_px": _opt("xsd:double"),
+        "rotation_deg": _opt("xsd:double"),
+        "anchor_lon": _opt("xsd:double"),
+        "anchor_lat": _opt("xsd:double"),
+        "thumb_path": _opt("xsd:string"),
+        "media_type": _opt("xsd:string"),
+    },
+    {
+        "@type": "Class",
         "@id": "WorldAtlas",
         "@key": _LEX_UID,
         "@documentation": {"@comment": "A generated or imported planet whose static layers live on disk (GeoJSON / PMTiles)."},
@@ -301,7 +320,7 @@ SCHEMA: list[dict[str, Any]] = [
 INT_FIELDS = {
     "in_world_start", "in_world_end", "resources", "influence", "value", "threat",
     "clock_segments", "clock_progress", "ticks_every_days", "trust_score",
-    "session_number", "start_day", "end_day", "population", "area_cells", "level", "count",
+    "session_number", "start_day", "end_day", "population", "area_cells", "level", "count", "width_px", "height_px",
 }
 # Set-valued fields that TerminusDB omits when empty.
 SET_FIELDS = {"aliases", "tags", "actors", "targets"}
@@ -309,7 +328,7 @@ SET_FIELDS = {"aliases", "tags", "actors", "targets"}
 LINK_FIELDS = {
     "location", "faction", "headquarters", "parent", "owner", "target", "caused_by",
     "about_event", "from_id", "to_id", "target_id", "agent_id", "fact_or_event_id",
-    "source_event", "ended_by_event", "canonical", "actors", "targets", "province",
+    "source_event", "ended_by_event", "canonical", "actors", "targets", "province", "place",
 }
 # Provenance links that can be dropped when cherry-picking if their target is absent.
 SOFT_LINK_FIELDS = {"caused_by", "source_event", "ended_by_event", "about_event"}

@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     atlas_sample_on_startup: bool = True
     tippecanoe_bin: str = "tippecanoe"
 
+    # Virtual tabletop (vtt/): where the world engine sends maps and scenes. Empty = not linked.
+    vtt_url: str = ""
+    vtt_timeout_seconds: float = 10.0
+
 
 @lru_cache
 def get_settings() -> Settings:
