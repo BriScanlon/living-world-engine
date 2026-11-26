@@ -154,6 +154,9 @@ class TableService:
         self.state = default_state(default_hex_px)
         self._fog_save_task: asyncio.Task | None = None
         self._view_save_task: asyncio.Task | None = None
+        # World context pushed by the Living World Engine for the place on the table.
+        # DM-only: never part of the table snapshot, so players' screens never receive it.
+        self.scene: dict[str, Any] | None = None
         self._load()
 
     # ------------------------------------------------------------ persistence
@@ -167,6 +170,18 @@ class TableService:
             self.state["map"] = self.db.get_asset(map_id)
         self.state["fog"] = self._load_fog(self._map_key())
         self.state["view"] = self._load_view(self.state["map"])
+        scene = self.db.get_setting("scene")
+        self.scene = scene if isinstance(scene, dict) else None
+
+    # ------------------------------------------------------------ world scene
+    async def set_scene(self, scene: dict[str, Any] | None) -> None:
+        self.scene = scene
+        self.db.set_setting("scene", scene)
+        await self.hub.broadcast({"type": "scene", "scene": scene}, role="dm")
+
+    def view_for(self, asset: dict[str, Any]) -> dict[str, Any]:
+        """A map's saved placement (true-scale pxPerSquare etc.), or its default."""
+        return self._load_view(asset)
 
     def _map_key(self) -> str:
         m = self.state.get("map")

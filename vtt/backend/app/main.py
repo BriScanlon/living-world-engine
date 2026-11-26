@@ -178,6 +178,45 @@ async def clear_table() -> dict:
     return {"ok": True}
 
 
+@app.get("/api/maps/{asset_id}/view")
+async def map_view(asset_id: str) -> dict:
+    """How a map sits on the table: mode, pxPerSquare (image px per 5 ft square), centre.
+    The world engine uses pxPerSquare to place battle maps on its globe at true scale."""
+    asset = _asset_or_404(asset_id)
+    view = svc.table.view_for(asset)
+    return {**view, "width": asset.get("width"), "height": asset.get("height"),
+            "metresPerPx": round(1.524 / view["pxPerSquare"], 6) if view.get("pxPerSquare") else None}
+
+
+# ------------------------------------------------------------------ world scene
+MAX_SCENE_BYTES = 200_000
+
+
+@app.get("/api/scene")
+async def get_scene() -> dict:
+    return {"scene": svc.table.scene}
+
+
+@app.post("/api/scene")
+async def set_scene(scene: dict[str, Any]) -> dict:
+    """World context for the place on the table, pushed by the Living World Engine:
+    who is here, who holds it, rumors to read aloud, creatures with SRD stats. Shown on /dm only."""
+    import json as _json
+
+    if len(_json.dumps(scene)) > MAX_SCENE_BYTES:
+        raise HTTPException(413, "Scene too large")
+    if not isinstance(scene.get("place"), dict) or not scene["place"].get("name"):
+        raise HTTPException(400, "A scene needs place.name")
+    await svc.table.set_scene(scene)
+    return {"ok": True}
+
+
+@app.delete("/api/scene")
+async def clear_scene() -> dict:
+    await svc.table.set_scene(None)
+    return {"ok": True}
+
+
 @app.post("/api/generate")
 async def generate(req: GenerateRequest) -> dict:
     return await svc.jobs.submit("generate", req.model_dump())
@@ -237,6 +276,7 @@ async def websocket(ws: WebSocket) -> None:
         await svc.hub.send(ws, {"type": "state", "state": svc.table.snapshot()})
         if role == "dm":
             await svc.hub.send(ws, {"type": "jobs", "jobs": svc.db.list_jobs()})
+            await svc.hub.send(ws, {"type": "scene", "scene": svc.table.scene})
         await svc.table.broadcast_clients()
         while True:
             msg = await ws.receive_json()

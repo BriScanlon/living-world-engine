@@ -14,6 +14,7 @@ export type PanelId =
   | 'generator'
   | 'jobs'
   | 'importer'
+  | 'world'
 
 export type Zone = 'main' | 'side'
 export type Layout = Record<Zone, PanelId[]>
@@ -29,13 +30,14 @@ export const PANEL_TITLES: Record<PanelId, string> = {
   generator: 'Map Generator',
   jobs: 'AI Jobs',
   importer: 'Import Static Map',
+  world: 'World',
 }
 
 export const ZONE_TITLES: Record<Zone, string> = { main: 'main area', side: 'sidebar' }
 
 export const DEFAULT_LAYOUT: Layout = {
   main: ['preview', 'mapScale', 'grid', 'calibration', 'fx', 'display', 'library'],
-  side: ['generator', 'jobs', 'importer'],
+  side: ['world', 'generator', 'jobs', 'importer'],
 }
 
 /** Panels that take the full width of the main area's grid. */

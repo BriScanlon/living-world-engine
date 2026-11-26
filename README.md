@@ -34,6 +34,7 @@ docker compose up --build
 |---|---|
 | DM dashboard | http://localhost:5173 |
 | Backend API (OpenAPI docs) | http://localhost:8000/docs |
+| Virtual tabletop: DM screen · player table | http://localhost:8080/dm · http://localhost:8080/table |
 | TerminusDB dashboard (admin / `root`) | http://localhost:6363 |
 
 On first start the backend creates the `living_world` database, applies the schema and seeds
@@ -47,6 +48,9 @@ On first start the backend creates the `living_world` database, applies the sche
 5. **Ingest** → drop Obsidian notes / PDFs / Word docs (try the files in `sample_data/`).
 6. **✦ New World** → answer (or roll) five Guidebook-style steps and build a fresh campaign world; switch between
    worlds from the campaign menu in the header.
+7. **On the table** → open the VTT's DM screen, generate or import a battle map, then in the atlas open a place,
+   link the map under *On the table* and press **Send scene to the VTT**: the map goes on the table and the DM screen's
+   **World** panel shows who is there, tensions, rumors and SRD stat lines.
 
 Ports already in use? Override `FRONTEND_PORT`, `BACKEND_PORT`, `TERMINUSDB_PORT` in `.env`.
 
@@ -215,6 +219,23 @@ the contested magic item. See [backend/srd/README.md](backend/srd/README.md).
 * **Time Travel** — any branch × any in-world day × any commit; force-directed graph,
   click an agent to see exactly what its prompt would contain.
 
+### 8. Virtual tabletop (`vtt/`)
+
+The tabletop half of the project: a FastAPI + SQLite service with a DM screen and a player table synced over
+WebSockets, AI or imported battle maps, fog and tokens. See [vtt/README.md](vtt/README.md). It runs as the `vtt`
+service in compose (port `VTT_PORT`, default 8080; its settings are the `VTT_*` variables in `.env.example`).
+
+The world engine talks to it server-side through `VTT_URL` (`http://vtt:8000` in compose; leave empty to switch the
+link off). The link is push-only, so the VTT never needs to know about TerminusDB:
+
+* **Maps are world facts.** Linking a VTT map to a place writes a bi-temporal `Map` document (from an in-world day,
+  replacing the place's previous map) at true scale, read from the VTT's grid (AI maps are 140 ft across). The atlas
+  draws each linked map's footprint on the globe, georeferenced to its place, when you zoom in close.
+* **Scenes are DM-only.** *Send scene to the VTT* pushes the place's current map to the table and a self-contained
+  scene to the DM screen for the chosen branch and day: holder, province and realm; who is there with what they want
+  and fear; tensions; rumors to read aloud; creatures and NPC stat lines from the SRD; recent non-secret events; and
+  plans in motion. Players never receive it.
+
 **Merging.** If `main` hasn't moved since the fork, merge is a fast-forward rebase. Otherwise the
 fork-point→forecast patch is applied with TerminusDB's `apply`; if that conflicts (e.g. you
 cherry-picked some events first), it falls back to a document-level 3-way merge in one commit,
@@ -244,6 +265,10 @@ Interactive docs at `/docs`. Highlights:
 | GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
 | GET · POST · DELETE | `/api/campaigns` · `/api/campaigns/active` · `/api/campaigns/{id}` | campaigns (one database per world) |
 | GET | `/api/srd` · `/api/srd/entry/{id}` | SRD catalogue info and entries |
+| GET | `/api/vtt/status` · `/api/vtt/maps` · `/api/vtt/media/{path}` | tabletop link status, its maps, proxied thumbnails |
+| GET · POST | `/api/places/{id}/maps` | maps linked to a place · link one `{vtt_map_id, day, branch, kind, rotation_deg}` |
+| DELETE | `/api/maps/{id}` | unlink (ends the map on that day) |
+| GET · POST | `/api/places/{id}/scene` · `/api/places/{id}/to-table` | preview the DM scene · push map + scene to the VTT |
 | POST | `/api/ingest/files` · `/ingest/text` · `/ingest/audio` · `/ingest/transcribe` | ingestion |
 | POST | `/api/admin/seed?reset=true` | reset to the demo world |
 
@@ -275,8 +300,13 @@ cd backend && uvicorn main:app --reload --port 8000
 # Frontend
 cd frontend && npm install && npm run dev            # http://localhost:5173 (proxies /api → :8000; override with VITE_API_PROXY)
 
+# Virtual tabletop (optional; then set VTT_URL=http://127.0.0.1:8090 for the backend)
+cd vtt/backend && pip install -r requirements.txt && MOCK_AI_PIPELINE=true uvicorn app.main:app --port 8090
+cd vtt/frontend && npm install && VTT_BACKEND=http://localhost:8090 npx vite --port 5175
+
 # Tests (unit + integration against a throwaway TerminusDB database)
 cd backend && pytest
+cd vtt/backend && pytest
 ```
 
 Layout:
@@ -291,9 +321,11 @@ backend/
   simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py · runs.py
   ingestion/    markdown.py · documents.py · audio.py · extract.py · resolution.py · pipeline.py
   llm/          client.py (OpenAI-compatible, validated JSON) · mock.py (deterministic BDI)
+  vtt_link/     client.py (VTT HTTP client) · scene.py (map links, footprints, DM scenes)
   api/routes.py · main.py · config.py · tests/
 frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Atlas,Branches,TimeTravel,Ingest,NewWorld}.tsx
 scripts/seed_demo_world.py · scripts/import_azgaar.py · scripts/build_srd_catalogue.py
+vtt/            the virtual tabletop (backend/ FastAPI + SQLite, frontend/ React DM screen and table)
 ```
 
 ## Notes & limitations

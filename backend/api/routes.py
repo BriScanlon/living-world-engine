@@ -256,6 +256,108 @@ def atlas_import(file: UploadFile = File(...), branch: str = Form(MAIN),
         raise HTTPException(400, str(e)) from e
 
 
+# =========================================================================== virtual tabletop link
+@router.get("/vtt/status")
+def vtt_status() -> dict[str, Any]:
+    from vtt_link import client
+    return {**client.status(), "url": client.base_url() or None}
+
+
+@router.get("/vtt/maps")
+def vtt_maps() -> list[dict[str, Any]]:
+    """The VTT's map library, with thumbnails re-served through this API (same origin)."""
+    from vtt_link import client
+    try:
+        maps = client.maps()
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+    return [{"id": m["id"], "title": m["title"], "source": m.get("source"), "media_type": m.get("media_type"),
+             "width": m.get("width"), "height": m.get("height"),
+             "thumb": f"/api/vtt/media/{m['thumb_url'].removeprefix('/media/')}" if m.get("thumb_url") else None}
+            for m in maps]
+
+
+@router.get("/vtt/media/{path:path}")
+def vtt_media(path: str):
+    from fastapi.responses import Response
+
+    from vtt_link import client
+    try:
+        r = client.media(path)
+    except client.VTTError as e:
+        raise HTTPException(404, str(e)) from e
+    return Response(r.content, media_type=r.headers.get("content-type", "application/octet-stream"),
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
+class LinkMapBody(BaseModel):
+    vtt_map_id: str
+    branch: str = MAIN
+    day: int | None = None
+    kind: str = "battle"
+    rotation_deg: float = 0.0
+    replace: bool = True
+
+
+@router.get("/places/{place_id:path}/maps")
+def place_maps(place_id: str, branch: str = MAIN, day: int | None = None) -> list[dict[str, Any]]:
+    from vtt_link.scene import maps_for
+    return maps_for(_store(), place_id, branch, day)
+
+
+@router.post("/places/{place_id:path}/maps")
+def place_link_map(place_id: str, body: LinkMapBody) -> dict[str, Any]:
+    from vtt_link import client
+    from vtt_link.scene import link_map
+    day = body.day if body.day is not None else WorldView(_store().all_documents(body.branch)).max_day()
+    try:
+        return link_map(_store(), place_id, body.vtt_map_id, branch=body.branch, day=day, kind=body.kind,
+                        rotation_deg=body.rotation_deg, replace=body.replace)
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.delete("/maps/{map_doc_id:path}")
+def unlink(map_doc_id: str, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
+    from vtt_link.scene import unlink_map
+    try:
+        unlink_map(_store(), map_doc_id, branch=branch, day=day)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"unlinked": map_doc_id}
+
+
+@router.get("/places/{place_id:path}/scene")
+def place_scene(place_id: str, branch: str = MAIN, day: int | None = None) -> dict[str, Any]:
+    """Preview what the VTT's DM screen would receive for this place."""
+    from vtt_link.scene import build_scene
+    try:
+        return build_scene(_store(), place_id, branch, day)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+class ToTableBody(BaseModel):
+    branch: str = MAIN
+    day: int | None = None
+    map_doc_id: str | None = None
+
+
+@router.post("/places/{place_id:path}/to-table")
+def place_to_table(place_id: str, body: ToTableBody) -> dict[str, Any]:
+    """Show the place on the table: its linked battle map, and its scene on the VTT's DM screen."""
+    from vtt_link import client
+    from vtt_link.scene import to_table
+    try:
+        return to_table(_store(), place_id, body.branch, body.day, body.map_doc_id)
+    except client.VTTError as e:
+        raise HTTPException(502, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
 # =========================================================================== campaigns (one database per world)
 @router.get("/campaigns")
 def campaigns() -> list[dict[str, Any]]:

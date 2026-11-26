@@ -30,6 +30,8 @@ services:
     environment:
       TERMINUSDB_URL: http://terminusdb:6363/
       TERMINUSDB_PASS: ${TERMINUSDB_ADMIN_PASS:-root}
+      # The virtual tabletop, reached over the compose network
+      VTT_URL: http://vtt:8000
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -56,6 +58,39 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Virtual tabletop: /table on the 4K table display, /dm on the DM's laptop or tablet
+  vtt:
+    build:
+      context: ./vtt
+    environment:
+      DATA_DIR: /data
+      MOCK_AI_PIPELINE: ${VTT_MOCK_AI_PIPELINE:-true}
+      LLM_API_URL: ${VTT_LLM_API_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${VTT_LLM_API_KEY:-ollama}
+      LLM_MODEL: ${VTT_LLM_MODEL:-qwen2.5:14b-instruct}
+      LLM_VISION_MODEL: ${VTT_LLM_VISION_MODEL:-qwen2.5vl:7b}
+      COMFY_IMAGE_URL: ${VTT_COMFY_IMAGE_URL:-http://host.docker.internal:8188}
+      COMFY_VIDEO_URL: ${VTT_COMFY_VIDEO_URL:-http://host.docker.internal:8188}
+      COMFY_IMAGE_WORKFLOW: ${VTT_COMFY_IMAGE_WORKFLOW:-flux_battlemap.json}
+      COMFY_VIDEO_WORKFLOW: ${VTT_COMFY_VIDEO_WORKFLOW:-wan21_flf2v_loop.json}
+      COMFY_TIMEOUT_S: ${VTT_COMFY_TIMEOUT_S:-1800}
+      WATCH_INBOX: ${VTT_WATCH_INBOX:-true}
+      INBOX_POLLING: ${VTT_INBOX_POLLING:-true}
+      DEFAULT_HEX_PX: ${VTT_DEFAULT_HEX_PX:-91.8}
+    ports:
+      - "${VTT_PORT:-8080}:8000"
+    volumes:
+      - vtt_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   terminusdb_data:
   backend_data:
+  vtt_data:

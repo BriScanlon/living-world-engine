@@ -225,6 +225,37 @@ export interface AtlasState {
   events: GeoJSON.FeatureCollection;
   rumors: GeoJSON.FeatureCollection;
   changed_provinces: number;
+  maps?: MapFootprint[];
+}
+
+export interface MapFootprint {
+  id: string;
+  name: string;
+  place: string;
+  vtt_map_id: string;
+  thumb_path: string | null;
+  corners: [number, number][];
+  width_m: number;
+  height_m: number;
+}
+
+export interface VttMap {
+  id: string;
+  title: string;
+  source: string | null;
+  media_type: string | null;
+  width: number | null;
+  height: number | null;
+  thumb: string | null;
+}
+
+export interface LinkedMap {
+  id: string;
+  name: string;
+  kind: string | null;
+  vtt_map_id: string;
+  from_day: number | null;
+  thumb: string | null;
 }
 
 export interface PlaceDetail {
@@ -241,6 +272,7 @@ export interface PlaceDetail {
   events: { id: string; title: string; day: number; summary: string }[];
   rumors: { dialogue: string; accuracy: string; speaker: string | null }[];
   places: { id: string; name: string; kind: string | null }[];
+  maps?: LinkedMap[];
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -329,5 +361,14 @@ export const api = {
     return req<{ upload_id: string; name: string; states: number }>("/wizard/upload", { method: "POST", body: fd });
   },
   srdEntry: (id: string) => req<any>(`/srd/entry/${id}`),
+  vttStatus: () => req<{ configured: boolean; reachable: boolean; url: string | null; error?: string }>("/vtt/status"),
+  vttMaps: () => req<VttMap[]>("/vtt/maps"),
+  linkMap: (placeId: string, body: { vtt_map_id: string; branch: string; day: number | null }) =>
+    req<{ map: string }>(`/places/${placeId}/maps`, json(body)),
+  unlinkMap: (mapId: string, branch: string, day: number | null) =>
+    req<any>(`/maps/${mapId}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`, { method: "DELETE" }),
+  toTable: (placeId: string, body: { branch: string; day: number | null; map_doc_id?: string | null }) =>
+    req<{ map: LinkedMap | null; scene: { place: string; people: number; rumors: number; creatures: number } }>(
+      `/places/${placeId}/to-table`, json(body)),
   srdInfo: () => req<{ attribution: string; license: string; counts: Record<string, number> }>("/srd"),
 };

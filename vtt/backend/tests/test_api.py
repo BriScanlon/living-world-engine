@@ -134,3 +134,37 @@ def test_per_map_view_scale_persists():
         client.post(f"/api/maps/{gen['id']}/push")
         v = client.get("/api/state").json()["view"]
         assert v["mode"] == "scale" and abs(v["pxPerSquare"] - 3840 / 28) < 0.01
+
+
+def test_world_scene_is_dm_only_and_persists():
+    scene = {"source": "living-world-engine", "day": 12, "place": {"name": "The Drowned Lantern", "kind": "tavern"},
+             "holder": "Wenna Tull", "people": [{"name": "Wenna Tull", "role": "keeper"}],
+             "rumors": [{"dialogue": "\"Mark my words...\"", "accuracy": "Exaggerated"}]}
+    with TestClient(app) as client:
+        assert client.post("/api/scene", json={"place": {}}).status_code == 400
+        with client.websocket_connect("/ws?role=dm") as dm, client.websocket_connect("/ws?role=table") as table:
+            first_dm = [dm.receive_json() for _ in range(3)]
+            assert any(m["type"] == "scene" for m in first_dm)
+            table.receive_json()
+            assert client.post("/api/scene", json=scene).json()["ok"]
+            for _ in range(10):
+                m = dm.receive_json()
+                if m["type"] == "scene":
+                    break
+            assert m["scene"]["place"]["name"] == "The Drowned Lantern"
+            # the table snapshot never carries world secrets
+            assert "scene" not in client.get("/api/state").json()
+        assert client.get("/api/scene").json()["scene"]["holder"] == "Wenna Tull"
+    with TestClient(app) as client:  # survives a restart
+        assert client.get("/api/scene").json()["scene"]["day"] == 12
+        assert client.delete("/api/scene").json()["ok"]
+        assert client.get("/api/scene").json()["scene"] is None
+
+
+def test_map_view_reports_true_scale_for_the_world_engine():
+    with TestClient(app) as client:
+        job = client.post("/api/generate", json={"description": "smugglers' cove"}).json()
+        gen = client.get(f"/api/maps/{_wait_job(client, job['id'])['result_asset_id']}").json()
+        v = client.get(f"/api/maps/{gen['id']}/view").json()
+        assert v["mode"] == "scale" and v["width"] == 3840
+        assert abs(v["metresPerPx"] - 1.524 / (3840 / 28)) < 1e-6  # 140 ft across

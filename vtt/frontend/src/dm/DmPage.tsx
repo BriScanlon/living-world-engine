@@ -7,6 +7,7 @@ import { Generator } from './Generator'
 import { Importer } from './Importer'
 import { Jobs } from './Jobs'
 import { Library } from './Library'
+import { WorldPanel } from './WorldPanel'
 import { useNaturalSize } from '../lib/mapView'
 import { CalibrationControls, DisplayControls, FxControls, GridControls, MapScaleControls } from './TableControls'
 import { ArrangeProvider, ZoneView } from './Arrange'
@@ -85,6 +86,8 @@ export function DmPage() {
         return <Jobs jobs={sync.jobs} />
       case 'importer':
         return <Importer toast={toast} watchInbox={config?.watchInbox ?? true} />
+      case 'world':
+        return <WorldPanel scene={sync.scene} />
     }
   }
 

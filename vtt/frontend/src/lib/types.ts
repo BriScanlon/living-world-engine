@@ -120,3 +120,35 @@ export interface AppConfig {
   watchInbox: boolean
   defaultHexPx: number
 }
+
+/** World context pushed by the Living World Engine for the place on the table (DM-only). */
+export interface ScenePerson {
+  name: string
+  role?: string | null
+  species?: string | null
+  char_class?: string | null
+  faction?: string | null
+  stats?: { name: string; ac?: number; hp?: number; cr?: string } | null
+  wants?: string[]
+  fears?: string[]
+}
+
+export interface Scene {
+  source?: string
+  campaign?: string
+  branch?: string
+  day?: number
+  place: { id?: string; name: string; kind?: string | null; description?: string | null }
+  holder?: string | null
+  province?: string | null
+  realm?: string | null
+  map?: { title?: string; vtt_map_id?: string } | null
+  people?: ScenePerson[]
+  creatures?: { name: string; count?: number; stats?: { ac?: number; hp?: number; cr?: string; type?: string } | null }[]
+  tensions?: { between: string; and: string; label: string; trust: number }[]
+  rumors?: { dialogue: string; accuracy?: string; speaker?: string | null }[]
+  events?: { day: number; title: string; summary?: string | null }[]
+  goals?: { name: string; owner: string; clock: string }[]
+  attribution?: string
+  sent_at?: string
+}

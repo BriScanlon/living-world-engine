@@ -8,12 +8,17 @@ using your own GPU box (Ollama/vLLM + ComfyUI with Flux and Wan 2.1).
 - **`/table`**: fullscreen kiosk for the tabletop monitor, built from 4 layers: looping video or 4K still → ambient FX → 1" grid → fog of war
 - **`/dm`**: control panel for a laptop or tablet: map library, AI map generator, Inkarnate importer, grid/FX/calibration controls, and a live fog-of-war brush that mirrors the table
 
-Works out of the box with **`MOCK_AI_PIPELINE=true`**: no GPU needed. Mock mode simulates the
+This is the tabletop half of the [Living World Engine](../README.md): it runs as the `vtt` service of the
+repo's `docker compose`, and the world engine's atlas can send it places to show (see *World link* below).
+
+Works out of the box with **`VTT_MOCK_AI_PIPELINE=true`**: no GPU needed. Mock mode simulates the
 pipeline stages and paints procedural 4K test maps, so you can try the whole thing on any machine.
 
 ---
 
 ## Quick start (Docker)
+
+From the **repository root** (the VTT starts with the rest of the stack):
 
 ```bash
 cp .env.example .env          # defaults to mock mode
@@ -24,8 +29,8 @@ Then, from any device on the LAN (replace `<host>` with the server's IP):
 
 | Device | URL |
 |---|---|
-| Tabletop monitor (Chrome/Edge) | `http://<host>:8000/table`. Click once for fullscreen. |
-| DM laptop / tablet | `http://<host>:8000/dm` |
+| Tabletop monitor (Chrome/Edge) | `http://<host>:8080/table`. Click once for fullscreen. |
+| DM laptop / tablet | `http://<host>:8080/dm` |
 
 Seed the starter pack (10 maps + 10 tokens):
 
@@ -33,15 +38,15 @@ Seed the starter pack (10 maps + 10 tokens):
 docker compose exec vtt python /app/scripts/seed_starter_assets.py
 ```
 
-Everything persists in `./data/` (SQLite DB, maps, thumbnails, inbox, starter pack).
+Everything persists in the `vtt_data` Docker volume (SQLite DB, maps, thumbnails, inbox, starter pack); local runs use `vtt/data/`.
 
 ### Kiosk tips for the table PC
 
 ```bash
 # Windows
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk --start-fullscreen --autoplay-policy=no-user-gesture-required http://<host>:8000/table
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk --start-fullscreen --autoplay-policy=no-user-gesture-required http://<host>:8080/table
 # Linux
-chromium --kiosk --autoplay-policy=no-user-gesture-required --noerrdialogs http://<host>:8000/table
+chromium --kiosk --autoplay-policy=no-user-gesture-required --noerrdialogs http://<host>:8080/table
 ```
 
 The cursor auto-hides after 2.5 s. The page requests a screen wake lock where the browser allows it
@@ -127,19 +132,24 @@ Jobs run one at a time (a single GPU queue) and stream their stage and progress 
 is down, a template prompt is used. If animation fails, or `COMFY_VIDEO_URL` is empty, the still map
 is kept and the job message says so.
 
-### Configuration (`.env`)
+### Configuration (root `.env`)
 
-| Variable | Default | Purpose |
+In the shared `.env` every VTT setting carries a `VTT_` prefix (the world engine has its own `LLM_*` settings);
+`docker-compose.yml` maps them to the names below. Running the VTT on its own (local development), use the
+unprefixed names.
+
+| Variable (root `.env`) | Default | Purpose |
 |---|---|---|
-| `MOCK_AI_PIPELINE` | `true` | `false` to use the GPU services below |
-| `LLM_API_URL` | `http://host.docker.internal:11434/v1` | OpenAI-compatible base URL (Ollama, vLLM, LM Studio…) |
-| `LLM_MODEL` / `LLM_VISION_MODEL` | `qwen2.5:14b-instruct` / `qwen2.5vl:7b` | text and vision models |
-| `COMFY_IMAGE_URL` | `http://host.docker.internal:8188` | ComfyUI running Flux |
-| `COMFY_VIDEO_URL` | `http://host.docker.internal:8188` | ComfyUI running Wan 2.1 FLF2V (empty = no animation) |
-| `COMFY_IMAGE_WORKFLOW` / `COMFY_VIDEO_WORKFLOW` | the two JSONs in `workflows/` | swap in your own graphs |
-| `COMFY_TIMEOUT_S` | `1800` | per-job timeout |
-| `WATCH_INBOX` / `INBOX_POLLING` | `true` / `true` | watched folder; polling is required on Docker Desktop bind mounts |
-| `DEFAULT_HEX_PX` | `91.8` | starting grid size before calibration |
+| `VTT_PORT` | `8080` | host port for `/table` and `/dm` |
+| `VTT_MOCK_AI_PIPELINE` | `true` | `false` to use the GPU services below |
+| `VTT_LLM_API_URL` | `http://host.docker.internal:11434/v1` | OpenAI-compatible base URL (Ollama, vLLM, LM Studio…) |
+| `VTT_LLM_MODEL` / `VTT_LLM_VISION_MODEL` | `qwen2.5:14b-instruct` / `qwen2.5vl:7b` | text and vision models |
+| `VTT_COMFY_IMAGE_URL` | `http://host.docker.internal:8188` | ComfyUI running Flux |
+| `VTT_COMFY_VIDEO_URL` | `http://host.docker.internal:8188` | ComfyUI running Wan 2.1 FLF2V (empty = no animation) |
+| `VTT_COMFY_IMAGE_WORKFLOW` / `VTT_COMFY_VIDEO_WORKFLOW` | the two JSONs in `workflows/` | swap in your own graphs |
+| `VTT_COMFY_TIMEOUT_S` | `1800` | per-job timeout |
+| `VTT_WATCH_INBOX` / `VTT_INBOX_POLLING` | `true` / `true` | watched folder; polling is required on Docker Desktop bind mounts |
+| `VTT_DEFAULT_HEX_PX` | `91.8` | starting grid size before calibration |
 
 Model files and node IDs are documented in [`workflows/README.md`](workflows/README.md).
 
