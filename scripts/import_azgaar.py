@@ -1,8 +1,8 @@
 """Import an Azgaar Fantasy Map Generator world into the Living World Engine.
 
-In Azgaar (https://azgaar.github.io/Fantasy-Map-Generator/): Menu > Save > Export > JSON > **Full**.
+In Azgaar (https://azgaar.github.io/Fantasy-Map-Generator/): Menu > Export > Export to JSON > **Full** (Save makes a .map file, which is not what this script reads).
 
-Usage (from repo root):
+Usage (from repo root, with the project's virtual environment, e.g. `.venv\Scripts\python.exe` on Windows):
     python scripts/import_azgaar.py MyWorld_Full.json                   # into main
     python scripts/import_azgaar.py MyWorld_Full.json --branch import-1 # review on a branch first
     python scripts/import_azgaar.py MyWorld_Full.json --place-greywater # put the demo town on a port

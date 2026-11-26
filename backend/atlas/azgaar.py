@@ -47,7 +47,7 @@ class AzgaarWorld:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if "pack" not in raw or "mapCoordinates" not in raw:
             raise ValueError("Not an Azgaar Full JSON export (needs 'pack' and 'mapCoordinates'): "
-                             "use Save > JSON > Full in Azgaar's Fantasy Map Generator")
+                             "use Export > Export to JSON > Full in Azgaar's Fantasy Map Generator")
         name = raw.get("info", {}).get("mapName") or Path(path).stem
         return cls(raw, slug or slugify(name))
 

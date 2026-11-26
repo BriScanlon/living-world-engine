@@ -152,8 +152,8 @@ forecast branch, so the branch log is an audit trail of the simulation.
 
 A MapLibre GL **globe** of the campaign planet that shows the simulation for any branch and in-world day.
 
-* **World source:** [Azgaar's Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator) (MIT).
-  Export with *Save > Export > JSON > **Full***, then
+* **World source:** [Azgaar's Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator) (MIT). Step-by-step: [docs/azgaar-field-guide.md](docs/azgaar-field-guide.md).
+  Export with *Export → Export to JSON → **Full*** (Save keeps a separate `.map` for editing in Azgaar), then
   `python scripts/import_azgaar.py MyWorld_Full.json [--branch import-1] [--place-greywater]`
   or `POST /api/atlas/import`. Coordinates use Azgaar's own projection (`lonW + x/width·lonT`, `latN − y/height·latT`).
 * **What the import creates:** realms → `Faction`s (colour, treasury, influence from size), provinces → `Province`

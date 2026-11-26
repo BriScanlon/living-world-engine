@@ -3,7 +3,7 @@
 Azgaar's Fantasy Map Generator (https://github.com/Azgaar/Fantasy-Map-Generator, MIT) is the
 intended source of worlds. Its repository only ships `.map` saves, which do not store cell
 polygons, so for tests, mock mode and first-run demos we generate a small world here that uses
-exactly the fields the importer reads from a real "Save > JSON > Full" export:
+exactly the fields the importer reads from a real "Export > Export to JSON > Full" file:
 
     info{width,height,seed,mapName}, mapCoordinates{latN,latT,lonW,lonT,...},
     pack{cells:[{i,v,c,p,h,biome,state,province,culture,religion,burg,pop}],

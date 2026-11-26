@@ -244,7 +244,7 @@ def atlas_file(slug: str, name: str) -> FileResponse:
 @router.post("/atlas/import")
 def atlas_import(file: UploadFile = File(...), branch: str = Form(MAIN),
                  place_greywater: bool = Form(False)) -> dict[str, Any]:
-    """Import an Azgaar 'Save > JSON > Full' export as a new atlas."""
+    """Import an Azgaar 'Export > Export to JSON > Full' file as a new atlas."""
     path = _save_upload(file)
     store = _store()
     if not store.branch_exists(branch):
