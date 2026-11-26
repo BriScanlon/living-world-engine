@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap, Marker } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, Branch, MapBrief, PaintStatus, PlaceDetail, VttMap } from "../api";
+import { api, AtlasState, AtlasView, Branch, MapBrief, PaintStatus, PartyKnows, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -31,6 +31,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const [ready, setReady] = useState(false);
   const [branch, setBranch] = useState("main");
   const [compare, setCompare] = useState(true);
+  const [view, setView] = useState<AtlasView>("dm");
   const [day, setDay] = useState<number | null>(null);
   const [state, setState] = useState<AtlasState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     setLoading(true);
     setError(null);
     try {
-      const s = await api.atlas(branch, day, compareTo);
+      const s = await api.atlas(branch, day, compareTo, view);
       setState(s);
       if (day === null) setDay(s.day);
     } catch (e) {
@@ -53,7 +54,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     } finally {
       setLoading(false);
     }
-  }, [branch, day, compareTo]);
+  }, [branch, day, compareTo, view]);
 
   useEffect(() => {
     load();
@@ -153,6 +154,15 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       id: "roads", type: "line", source: src("roads"), ...srcLayer("roads"), minzoom: 3,
       paint: { "line-color": "#6b4f2a", "line-width": 1, "line-dasharray": [3, 2], "line-opacity": 0.8 },
     });
+    // Party view: fog over provinces the party doesn't know (0 seen, 1 heard of, 2 unknown)
+    map.addLayer({
+      id: "party-fog", type: "fill", source: src("provinces"), ...srcLayer("provinces"),
+      paint: {
+        "fill-color": ["match", ["coalesce", ["feature-state", "fog"], 0], 2, "#0b0f16", "#1c2433"],
+        "fill-opacity": ["match", ["coalesce", ["feature-state", "fog"], 0], 2, 0.9, 1, 0.5, 0],
+        "fill-opacity-transition": { duration: 500 },
+      },
+    });
     // live layers
     const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
     map.addSource("places", { type: "geojson", data: empty });
@@ -213,7 +223,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     for (const [uid, p] of Object.entries(state.provinces)) {
       map.setFeatureState(
         tiled ? { source: "base", sourceLayer: "provinces", id: uid } : { source: "l-provinces", id: uid },
-        { color: p.color, changed: p.changed },
+        { color: p.color, changed: p.changed, fog: p.known === "visited" ? 0 : p.known === "heard" ? 1 : 2 },
       );
     }
     (map.getSource("places") as GeoJSONSource).setData(state.places);
@@ -263,11 +273,17 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
 
   const openDetail = useCallback(
     (id: string) => {
-      api.place(id, branch, day).then(setDetail).catch((e) => setError(e.message));
+      if (view === "party" && id.startsWith("Province/")) {
+        const p = Object.values(stateRef.current?.provinces ?? {}).find((x) => x.id === id);
+        if (p && !p.known) return; // fog: nothing to show
+      }
+      api.place(id, branch, day, view).then(setDetail).catch((e) => setError(e.message));
     },
-    [branch, day],
+    [branch, day, view],
   );
   openRef.current = openDetail;
+  const stateRef = useRef<AtlasState | null>(null);
+  stateRef.current = state;
 
   const changed = useMemo(() => Object.values(state?.provinces ?? {}).filter((p) => p.changed), [state]);
   const recent = useMemo(
@@ -300,14 +316,27 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
             </div>
           </Field>
           <div className="flex flex-wrap items-center gap-3 pb-1 text-sm text-ink-300">
-            <label className="flex items-center gap-1.5" title="Highlight what differs from canon">
-              <input type="checkbox" className="accent-amber-500" disabled={branch === "main"} checked={compare && branch !== "main"} onChange={(e) => setCompare(e.target.checked)} />
-              Compare with main
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="checkbox" className="accent-amber-500" checked={showSecret} onChange={(e) => setShowSecret(e.target.checked)} />
-              Secret events
-            </label>
+            <div className="inline-flex rounded-lg bg-ink-800 p-0.5 ring-1 ring-ink-700" title="Party view: only what the player characters know">
+              {(["dm", "party"] as const).map((v) => (
+                <button key={v} type="button"
+                  className={cx("rounded-md px-2.5 py-1 text-xs font-medium", view === v ? "bg-amber-500 text-ink-950" : "text-ink-300 hover:text-ink-100")}
+                  onClick={() => { setView(v); setDetail(null); }}>
+                  {v === "dm" ? "DM view" : "Party view"}
+                </button>
+              ))}
+            </div>
+            {view === "dm" && (
+              <>
+                <label className="flex items-center gap-1.5" title="Highlight what differs from canon">
+                  <input type="checkbox" className="accent-amber-500" disabled={branch === "main"} checked={compare && branch !== "main"} onChange={(e) => setCompare(e.target.checked)} />
+                  Compare with main
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" className="accent-amber-500" checked={showSecret} onChange={(e) => setShowSecret(e.target.checked)} />
+                  Secret events
+                </label>
+              </>
+            )}
             {loading && <Spinner />}
           </div>
         </div>
@@ -320,7 +349,15 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
           {state?.atlas && (
             <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-ink-950/80 px-3 py-2 text-xs text-ink-200">
               <div className="font-display text-sm text-ink-100">{state.atlas.name}</div>
-              <div>Day {state.day} · {state.branch}{compareTo ? " vs main" : ""}</div>
+              <div>Day {state.day} · {state.branch}{compareTo && view === "dm" ? " vs main" : ""}</div>
+              {state.view === "party" && (
+                <div className="mt-1 border-t border-ink-700 pt-1 text-ember-300">
+                  {state.party?.name
+                    ? <>What {state.party.name} knows{state.party.where ? <> · at <b>{state.party.where}</b></> : ""}<br />
+                        <span className="text-ink-300">{plural(state.party.visited, "place")} visited · {state.party.heard} heard of</span></>
+                    : "This world has no party faction yet"}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -329,6 +366,12 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
           {detail ? (
             <Card title={detail.name} subtitle={[detail.type, detail.kind, detail.population ? `pop. ${detail.population.toLocaleString()}` : null].filter(Boolean).join(" · ")}
               actions={<Button variant="ghost" onClick={() => setDetail(null)}>✕</Button>}>
+              {detail.view === "party" && (
+                <p className="mb-1 text-xs text-ember-300">
+                  {detail.party?.here ? "The party is here. " : ""}
+                  {detail.party?.state === "visited" ? "The party has been here." : "The party has only heard of this place."}
+                </p>
+              )}
               {detail.description && <p className="text-sm text-ink-300">{detail.description}</p>}
               <div className="mt-2 space-y-1 text-sm">
                 {detail.controller && <div><span className="text-ink-400">Held by</span> <span className="text-ink-100">{detail.controller.name}</span></div>}
@@ -342,11 +385,14 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
               ))}</Section>}
               {!!detail.places.length && <Section title="Places">{detail.places.map((p) => <li key={p.id}><button className="text-ember-300 hover:underline" onClick={() => openDetail(p.id)}>{p.name}</button> <span className="text-ink-400">{p.kind}</span></li>)}</Section>}
               {!!detail.events.length && <Section title="What happened">{detail.events.map((e) => <li key={e.id}><span className="font-mono text-xs text-ink-400">d{e.day}</span> {e.title}</li>)}</Section>}
-              {detail.type === "Location" && (
+              {detail.view !== "party" && detail.party && (
+                <PartyMark detail={detail} branch={branch} day={day} onChanged={() => { openDetail(detail.id); load(); }} />
+              )}
+              {detail.type === "Location" && detail.view !== "party" && (
                 <TableLink detail={detail} branch={branch} day={day}
                   onChanged={() => { openDetail(detail.id); load(); }} />
               )}
-              {!!detail.rumors.length && <Section title="Rumors heard here">{detail.rumors.map((r, i) => <li key={i} className="italic">{r.dialogue} <Badge tone={accuracyTone(r.accuracy)}>{r.accuracy}</Badge></li>)}</Section>}
+              {!!detail.rumors.length && <Section title="Rumors heard here">{detail.rumors.map((r, i) => <li key={i} className="italic">{r.dialogue} {r.accuracy && <Badge tone={accuracyTone(r.accuracy)}>{r.accuracy}</Badge>}</li>)}</Section>}
             </Card>
           ) : (
             <Card title="Realms" subtitle="Click a province, town or event pin on the map.">
@@ -403,6 +449,40 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** DM control: what the party knows of this place, from the day on the slider (bi-temporal, per branch). */
+function PartyMark({ detail, branch, day, onChanged }: { detail: PlaceDetail; branch: string; day: number | null; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const p = detail.party!;
+  const set = async (state: "visited" | "heard" | "unknown") => {
+    setBusy(true); setErr(null);
+    try { await api.markParty({ place: detail.id, state, branch, day }); onChanged(); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const current: PartyKnows | "unknown" = p.state ?? "unknown";
+  const derived = p.state && !p.marked; // known through events, members or a place inside it, not a DM mark
+  return (
+    <div className="mt-3">
+      <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-400">
+        Party knowledge {busy && <Spinner />}
+      </div>
+      <div className="inline-flex rounded-lg bg-ink-800 p-0.5 ring-1 ring-ink-700">
+        {([["visited", "Been there"], ["heard", "Heard of"], ["unknown", "Unknown"]] as const).map(([v, label]) => (
+          <button key={v} type="button" disabled={busy}
+            className={cx("rounded-md px-2.5 py-1 text-xs font-medium", current === v ? "bg-ember-500/80 text-ink-950" : "text-ink-300 hover:text-ink-100")}
+            onClick={() => set(v)}>{label}</button>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-ink-400">
+        {p.here ? "The party is here now. " : ""}
+        {derived ? "Known from what the party did or learned; marking it records it from this day." : `Marks apply from day ${day ?? "now"} on this branch.`}
+      </p>
+      {err && <p className="mt-1 text-xs text-rose-300">{err}</p>}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from atlas import party
 from atlas.azgaar import AzgaarWorld
 from atlas.sample_world import write_sample
 from config import get_settings
@@ -149,7 +150,8 @@ def _coords(w: WorldView, doc_id: str | None, depth: int = 0) -> tuple[float, fl
 
 
 def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
-                compare: str | None = None) -> dict[str, Any]:
+                compare: str | None = None, view: str = "dm") -> dict[str, Any]:
+    """Live map state. ``view="party"`` shows only what the party knows (see :mod:`atlas.party`)."""
     docs = store.all_documents(branch)
     full = WorldView(docs)
     atlases = [d for d in full.all.values() if d["@type"] == "WorldAtlas"]
@@ -161,16 +163,24 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
     w = WorldView(docs, the_day)
     cw = WorldView(store.all_documents(compare), the_day) if compare and compare != branch else None
 
-    factions = {f["@id"]: f for f in w.of_type("Faction")}
+    pv = party.view(w) if view == "party" else None
+    if pv:
+        cw = None  # the party can't compare timelines
+
+    factions = {f["@id"]: f for f in w.of_type("Faction") if not pv or f["@id"] in pv.factions}
     provinces = {}
     for p in w.of_type("Province"):
         ctl = w.controller_of(p["@id"])
         before = cw.controller_of(p["@id"]) if cw else None
+        known = pv.provinces.get(p["@id"]) if pv else party.VISITED
+        if known != party.VISITED:
+            ctl = None  # heard of, or unknown: who holds it isn't something the party can see
         provinces[p["uid"]] = {
-            "id": p["@id"], "name": p["name"], "lon": p.get("lon"), "lat": p.get("lat"),
+            "id": p["@id"], "name": p["name"] if known else None, "lon": p.get("lon"), "lat": p.get("lat"),
             "controller": ctl, "controller_name": w.name(ctl) if ctl else None,
             "color": (factions.get(ctl) or {}).get("color") or (_colour(ctl) if ctl else "#9aa3ad"),
             "changed": bool(cw) and before != ctl, "previous": w.name(before) if cw and before != ctl else None,
+            "known": known,
         }
     held: dict[str, int] = {}
     for p in provinces.values():
@@ -183,12 +193,16 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
             people.setdefault(c["location"], []).append(c["name"])
     places = []
     for loc in w.of_type("Location"):
+        if pv and loc["@id"] not in pv.places and loc.get("location_type") != "continent":
+            continue
         xy = _coords(w, loc["@id"])
         if not xy:
             continue
         places.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": list(xy)},
                        "properties": {"id": loc["@id"], "name": loc["name"], "kind": loc.get("location_type") or "place",
-                                      "people": people.get(loc["@id"], []),
+                                      "people": [] if pv else people.get(loc["@id"], []),
+                                      "known": pv.places.get(loc["@id"]) if pv else None,
+                                      "here": bool(pv) and pv.where == loc["@id"],
                                       "campaign": not loc.get("source_session", "").startswith("import/"),
                                       # where play begins: the wizard's start town, or the hand-built demo's town
                                       "start": "campaign-start" in loc.get("tags", [])
@@ -199,7 +213,7 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
     events = []
     for e in w.of_type("Event"):
         start = e.get("in_world_start") or 0
-        if start < the_day - EVENT_WINDOW_DAYS:
+        if start < the_day - EVENT_WINDOW_DAYS or (pv and e["@id"] not in pv.events):
             continue
         xy = _coords(w, e.get("location"))
         for t in e.get("targets", []) + e.get("actors", []):
@@ -212,34 +226,59 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
                                       "age": the_day - start, "new": bool(cw) and e["@id"] not in base_events}})
     rumors = []
     for r in w.of_type("Rumor"):
+        if pv and r["@id"] not in pv.rumors:
+            continue
         xy = _coords(w, r.get("location"))
         if xy:
             rumors.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": list(xy)},
-                           "properties": {"id": r["@id"], "dialogue": r.get("dialogue"), "accuracy": r.get("accuracy"),
+                           "properties": {"id": r["@id"], "dialogue": r.get("dialogue"),
+                                          "accuracy": None if pv else r.get("accuracy"),
                                           "speaker": r.get("speaker"), "day": r.get("in_world_start")}})
     fc = lambda feats: {"type": "FeatureCollection", "features": feats}  # noqa: E731
     return {
         "atlas": {"slug": a["uid"], "name": a["name"], "bbox": json.loads(a["bbox"]),
                   "centre": json.loads(a["centre"]) if a.get("centre") else None,
                   "layers": json.loads(a["layers"]), "has_tiles": a["has_tiles"]},
-        "branch": branch, "compare": compare, "day": the_day, "max_day": full.max_day(),
+        "branch": branch, "compare": None if pv else compare, "day": the_day, "max_day": full.max_day(),
+        "view": "party" if pv else "dm",
+        "party": _party_summary(w, pv) if view == "party" else None,
         "factions": sorted(({"id": fid, "name": f["name"], "color": f.get("color") or _colour(fid),
                              "provinces": held.get(fid, 0), "party": bool(f.get("is_party"))}
                             for fid, f in factions.items()), key=lambda f: (-f["provinces"], f["name"])),
         "provinces": provinces,
         "places": fc(places), "events": fc(events), "rumors": fc(rumors),
         "changed_provinces": sum(p["changed"] for p in provinces.values()),
-        "maps": _footprints(w),
+        "maps": [m for m in _footprints(w) if not pv or pv.places.get(m["place"]) == party.VISITED],
     }
 
 
-def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int | None = None) -> dict[str, Any]:
-    """Everything the engine knows about one place: who holds it, who's there, what happened, what's said."""
+def _party_summary(w: WorldView, pv: party.PartyView | None) -> dict[str, Any]:
+    if not pv or not pv.party:
+        return {"name": None, "where": None, "visited": 0, "heard": 0, "provinces": 0}
+    return {"name": pv.party["name"], "where": w.name(pv.where) if pv.where else None, "where_id": pv.where,
+            "visited": sum(v == party.VISITED for v in pv.places.values()),
+            "heard": sum(v == party.HEARD for v in pv.places.values()),
+            "provinces": len(pv.provinces)}
+
+
+def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int | None = None,
+                 view: str = "dm") -> dict[str, Any]:
+    """Everything the engine knows about one place: who holds it, who's there, what happened, what's said.
+
+    With ``view="party"`` only what the party knows; an unknown place returns ``{}``.
+    """
     docs = store.all_documents(branch)
     w = WorldView(docs, day if day is not None else WorldView(docs).max_day())
     d = w.get(doc_id)
     if not d:
         return {}
+    pv = party.view(w) if view == "party" else None
+    known_state = pv.place_state(doc_id) if pv else None
+    if pv and not known_state:
+        return {}
+    if pv:
+        return _party_place(w, d, pv, known_state)
+    marks = party.view(w)
     inside = {doc_id} | {l["@id"] for l in w.of_type("Location") if l.get("parent") == doc_id or l.get("province") == doc_id}
     ctl = w.controller_of(doc_id) or (w.controller_of(d["province"]) if d.get("province") else None)
     return {
@@ -263,6 +302,40 @@ def place_detail(store: GraphStore, doc_id: str, branch: str = "main", day: int 
                   "from_day": m.get("in_world_start"),
                   "thumb": f"/api/vtt/media/{m['thumb_path']}" if m.get("thumb_path") else None}
                  for m in w.of_type("Map") if m.get("place") == doc_id],
+        "party": {"state": marks.place_state(doc_id), "here": marks.where == doc_id,
+                  "marked": next((e["kind"] for e in w.of_type("EpistemicEdge") if marks.party
+                                  and e["agent_id"] == marks.party["@id"] and e["fact_or_event_id"] == doc_id), None)}
+        if marks.party else None,
+    }
+
+
+def _party_place(w: WorldView, d: dict[str, Any], pv: party.PartyView, state: str) -> dict[str, Any]:
+    """A place as the party knows it: first-hand if visited, by name and hearsay if not."""
+    doc_id = d["@id"]
+    inside = {doc_id} | {l["@id"] for l in w.of_type("Location") if l.get("parent") == doc_id or l.get("province") == doc_id}
+    seen = state == party.VISITED
+    ctl = (w.controller_of(doc_id) or (w.controller_of(d["province"]) if d.get("province") else None)) if seen else None
+    return {
+        "id": doc_id, "type": d["@type"], "name": d["name"], "description": d.get("description") if seen else None,
+        "kind": d.get("location_type"), "population": d.get("population") if seen else None,
+        "controller": {"id": ctl, "name": w.name(ctl)} if ctl else None,
+        "province": {"id": d["province"], "name": w.name(d["province"])}
+        if d.get("province") and d["province"] in pv.provinces else None,
+        "people": [{"id": c["@id"], "name": c["name"], "role": c.get("role"), "species": c.get("species"),
+                    "char_class": None, "srd_ref": None} for c in w.of_type("Character")
+                   if c.get("location") in inside and c["@id"] in pv.known and c["@id"] not in pv.agents],
+        "monsters": [],
+        "events": sorted(({"id": e["@id"], "title": e["name"], "day": e.get("in_world_start"), "summary": e.get("summary")}
+                          for e in w.of_type("Event") if e["@id"] in pv.events
+                          and (e.get("location") in inside or set(e.get("targets", [])) & inside)),
+                         key=lambda e: -(e["day"] or 0))[:12],
+        "rumors": [{"dialogue": r.get("dialogue"), "accuracy": None, "speaker": r.get("speaker")}
+                   for r in w.of_type("Rumor") if r["@id"] in pv.rumors and r.get("location") in inside][:8],
+        "places": [{"id": l["@id"], "name": l["name"], "kind": l.get("location_type")} for l in w.of_type("Location")
+                   if l["@id"] in inside and l["@id"] != doc_id and l["@id"] in pv.places][:20],
+        "maps": [],
+        "party": {"state": state, "here": pv.where == doc_id, "marked": None},
+        "view": "party",
     }
 
 

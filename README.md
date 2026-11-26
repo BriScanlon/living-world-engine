@@ -43,7 +43,7 @@ On first start the backend creates the `living_world` database, applies the sche
 1. **Session Forecaster** → *Use demo summary* → **Run Forecast**. Watch each LangGraph node run live.
 2. **Open DM Briefing** → read the four sections; tick events to **Cherry-Pick**, or **Merge to Canon**.
 3. **World Atlas** → spin the globe; pick the forecast branch, tick *Compare with main* and press ▶
-   to watch provinces change hands day by day.
+   to watch provinces change hands day by day. Switch to **Party view** to see only what the party knows.
 4. **Time Travel** → pick a branch, drag the in-world day slider, or pick a historic commit.
 5. **Ingest** → drop Obsidian notes / PDFs / Word docs (try the files in `sample_data/`).
 6. **✦ New World** → answer (or roll) five Guidebook-style steps and build a fresh campaign world; switch between
@@ -222,7 +222,22 @@ the contested magic item. See [backend/srd/README.md](backend/srd/README.md).
 * **Time Travel** — any branch × any in-world day × any commit; force-directed graph,
   click an agent to see exactly what its prompt would contain.
 
-### 8. Virtual tabletop (`vtt/`)
+### 8. Party view: fog of war on the atlas (`backend/atlas/party.py`)
+
+The atlas's **Party view** applies the agents' epistemic rule to the players: the party faction and its members see
+only what they know, on that branch and day.
+
+* **Visited** places: KNOWS marks, places where the party took part in an event, where a member is, and everything
+  that contains them. Their province is clear and shows who holds it.
+* **Heard-of** places: anything else the party legally knows (BELIEVES marks, events it knows of, goals and
+  relationships). Name only; its province is half-fogged with no holder.
+* Everything else is fog. Events are the ones the party knows or took part in; rumors are the ones it knows plus
+  tavern talk where it is now, never with their accuracy. Comparing branches is off.
+* In the DM view each place has **Party knowledge: Been there / Heard of / Unknown**. Marks are bi-temporal
+  EpistemicEdges from the slider's day, so earlier days keep their fog. *Send scene to the VTT* marks the place
+  visited (the table is where the party is).
+
+### 9. Virtual tabletop (`vtt/`)
 
 The tabletop half of the project: a FastAPI + SQLite service with a DM screen and a player table synced over
 WebSockets, AI or imported battle maps, fog and tokens. See [vtt/README.md](vtt/README.md). It runs as the `vtt`
@@ -271,7 +286,8 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/branches/{name}/log` | commit history |
 | GET | `/api/world/snapshot?branch=&day=&commit=` | time travel |
 | GET | `/api/world/agent/{id}?branch=&day=` | an agent's epistemic context |
-| GET | `/api/atlas?branch=&day=&compare=` | live map state: territory, places, events, rumors |
+| GET | `/api/atlas?branch=&day=&compare=&view=dm\|party` | live map state: territory, places, events, rumors (party view: fog of war) |
+| POST | `/api/party/knowledge` | `{place, state: visited\|heard\|unknown, branch, day}`: what the party knows of a place |
 | GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |
 | POST | `/api/atlas/import` | import an Azgaar Full JSON export |
 | GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
@@ -331,6 +347,7 @@ Layout:
 backend/
   graph/        schema.py · store.py (TerminusDB: branches, diff, merge, cherry-pick) · world.py (temporal/epistemic views)
   atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
+                party.py (party view: what the party knows, DM marks)
   wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
   srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
                 builders.py · briefing.py (4-part diff) · seed.py

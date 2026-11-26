@@ -220,7 +220,9 @@ export interface AtlasState {
   day: number;
   max_day: number;
   factions: { id: string; name: string; color: string; provinces: number; party: boolean }[];
-  provinces: Record<string, { id: string; name: string; lon: number | null; lat: number | null; controller: string | null; controller_name: string | null; color: string; changed: boolean; previous: string | null }>;
+  provinces: Record<string, { id: string; name: string | null; lon: number | null; lat: number | null; controller: string | null; controller_name: string | null; color: string; changed: boolean; previous: string | null; known: PartyKnows }>;
+  view?: AtlasView;
+  party?: { name: string | null; where: string | null; where_id?: string | null; visited: number; heard: number; provinces: number } | null;
   places: GeoJSON.FeatureCollection;
   events: GeoJSON.FeatureCollection;
   rumors: GeoJSON.FeatureCollection;
@@ -258,6 +260,10 @@ export interface LinkedMap {
   thumb: string | null;
 }
 
+export type AtlasView = "dm" | "party";
+/** What the party knows of a place: been there, heard of it, or nothing (fog). */
+export type PartyKnows = "visited" | "heard" | null;
+
 export interface PlaceDetail {
   id: string;
   type: string;
@@ -273,6 +279,8 @@ export interface PlaceDetail {
   rumors: { dialogue: string; accuracy: string; speaker: string | null }[];
   places: { id: string; name: string; kind: string | null }[];
   maps?: LinkedMap[];
+  party?: { state: PartyKnows; here: boolean; marked: "KNOWS" | "BELIEVES" | null } | null;
+  view?: AtlasView;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -342,12 +350,14 @@ export const api = {
     return req<{ text: string }>("/ingest/transcribe", { method: "POST", body: fd });
   },
   job: (id: string) => req<IngestJob>(`/ingest/jobs/${id}`),
-  atlas: (branch: string, day: number | null, compare: string | null) =>
+  atlas: (branch: string, day: number | null, compare: string | null, view: AtlasView = "dm") =>
     req<AtlasState>(
-      `/atlas?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}${compare ? `&compare=${enc(compare)}` : ""}`,
+      `/atlas?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}${compare ? `&compare=${enc(compare)}` : ""}&view=${view}`,
     ),
-  place: (id: string, branch: string, day: number | null) =>
-    req<PlaceDetail>(`/atlas/place/${id}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`),
+  place: (id: string, branch: string, day: number | null, view: AtlasView = "dm") =>
+    req<PlaceDetail>(`/atlas/place/${id}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}&view=${view}`),
+  markParty: (body: { place: string; state: "visited" | "heard" | "unknown"; branch: string; day: number | null }) =>
+    req<{ place: string; state: string; day: number; changed: boolean }>("/party/knowledge", json(body)),
   atlasFile: (slug: string, name: string) => `/api/atlas/files/${slug}/${name}`,
   campaigns: () => req<Campaign[]>("/campaigns"),
   activateCampaign: (id: string) => req<{ active: string }>("/campaigns/active", json({ id })),
