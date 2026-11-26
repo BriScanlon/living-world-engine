@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ffmpeg \
+    && apt-get install -y --no-install-recommends curl ffmpeg tippecanoe \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt backend/requirements-extras.txt /app/backend/
@@ -24,6 +24,7 @@ COPY backend /app/backend
 COPY scripts /app/scripts
 COPY sample_data /app/sample_data
 
+ENV ATLAS_DIR=/app/data/atlas
 WORKDIR /app/backend
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

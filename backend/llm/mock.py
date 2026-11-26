@@ -176,7 +176,7 @@ def agent_intent(agent_id: str, world: WorldView, ctx: dict[str, Any], *, day: i
         if ttype == "Item" and not _knows_holder(agent_id, allies, t, ctl, world, known):
             opt(p * 1.05, "investigate", t, f"{name} {kind.lower()} {world.name(t)} but no longer knows who has it.")
             continue
-        if ttype in ("Location", "Item"):
+        if ttype in ("Location", "Province", "Item"):
             if ctl in allies:
                 if kind == "FEARS":
                     opt(p, "hide", t, f"{name} fears exposure through {world.name(t)} and moves to bury it.")

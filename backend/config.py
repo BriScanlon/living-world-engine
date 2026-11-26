@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     whisper_model: str = "base"
     upload_dir: str = "/tmp/lwe_uploads"
 
+    # World Atlas
+    atlas_dir: str = "./data/atlas"
+    # On first start, generate the sample planet, import it and place the Greywater demo on it
+    atlas_sample_on_startup: bool = True
+    tippecanoe_bin: str = "tippecanoe"
+
 
 @lru_cache
 def get_settings() -> Settings:

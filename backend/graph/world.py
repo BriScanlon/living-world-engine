@@ -104,6 +104,7 @@ class WorldView:
                 link(d["@id"], d.get("location"))
             elif t == "Location":
                 link(d["@id"], d.get("parent"))
+                link(d["@id"], d.get("province"))
             elif t == "Goal":
                 link(d["owner"], d.get("target"))
         self._adj = adj
