@@ -1,0 +1,134 @@
+{
+  "_comment": [
+    "ComfyUI API-format workflow: FLUX.1 [dev] top-down battle map -> 4x model upscale -> exact 3840x2160 PNG.",
+    "Keys starting with '_' are documentation only; the VTT strips them before POST /prompt.",
+    "The '_params' map says which node input the VTT overwrites for every job.",
+    "Node IDs:",
+    "  1  UNETLoader             - Flux dev diffusion model        (models/diffusion_models)",
+    "  2  DualCLIPLoader         - T5-XXL + CLIP-L text encoders   (models/text_encoders)",
+    "  3  VAELoader              - Flux VAE ae.safetensors         (models/vae)",
+    "  6  CLIPTextEncode         - POSITIVE PROMPT  <- image_prompt from the LLM (scale rules appended)",
+    "  7  FluxGuidance           - distilled guidance (3.0-4.0 works well for maps)",
+    "  8  EmptySD3LatentImage    - base resolution  <- width/height (1920x1088 = ~2 MP, Flux sweet spot)",
+    "  9  RandomNoise            - SEED <- seed",
+    " 10  KSamplerSelect         - sampler",
+    " 11  BasicScheduler         - steps / scheduler",
+    " 12  BasicGuider",
+    " 13  SamplerCustomAdvanced",
+    " 14  VAEDecode",
+    " 15  UpscaleModelLoader     - 4x ESRGAN-style upscaler          (models/upscale_models)",
+    " 16  ImageUpscaleWithModel  - 1920x1088 -> 7680x4352",
+    " 17  ImageScale             - FINAL SIZE <- target_width/target_height (3840x2160, center crop)",
+    " 18  SaveImage              - filename_prefix <- 'vtt/<asset id>'",
+    "No upscaler installed? Point node 17's 'image' input at [\"14\", 0] and delete nodes 15-16."
+  ],
+  "_params": {
+    "prompt":          { "node": "6",  "input": "text",            "comment": "LLM image_prompt (+ enforced top-down 140x80ft scale suffix)" },
+    "seed":            { "node": "9",  "input": "noise_seed",      "comment": "random per job unless the seeder pins it" },
+    "width":           { "node": "8",  "input": "width",           "comment": "latent width (maps 1920, tokens 1024)" },
+    "height":          { "node": "8",  "input": "height",          "comment": "latent height (maps 1088, tokens 1024)" },
+    "target_width":    { "node": "17", "input": "width",           "comment": "final PNG width (maps 3840, tokens 512)" },
+    "target_height":   { "node": "17", "input": "height",          "comment": "final PNG height (maps 2160, tokens 512)" },
+    "filename_prefix": { "node": "18", "input": "filename_prefix", "comment": "output name inside ComfyUI/output" }
+  },
+
+  "1": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "[1] Load Flux dev model" },
+    "inputs": { "unet_name": "flux1-dev.safetensors", "weight_dtype": "default" }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "_meta": { "title": "[2] Load T5-XXL + CLIP-L" },
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "[3] Load Flux VAE" },
+    "inputs": { "vae_name": "ae.safetensors" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "[6] POSITIVE PROMPT <- image_prompt" },
+    "inputs": {
+      "text": "strictly 90-degree top-down orthographic battle map of a stone dungeon, zero perspective distortion, no grid, covering a 140ft by 80ft area (doors 5ft wide, corridors 10ft wide)",
+      "clip": ["2", 0]
+    }
+  },
+  "7": {
+    "class_type": "FluxGuidance",
+    "_meta": { "title": "[7] Flux guidance" },
+    "inputs": { "guidance": 3.5, "conditioning": ["6", 0] }
+  },
+  "8": {
+    "class_type": "EmptySD3LatentImage",
+    "_meta": { "title": "[8] LATENT SIZE <- width/height" },
+    "inputs": { "width": 1920, "height": 1088, "batch_size": 1 }
+  },
+  "9": {
+    "class_type": "RandomNoise",
+    "_meta": { "title": "[9] SEED <- seed" },
+    "inputs": { "noise_seed": 42 }
+  },
+  "10": {
+    "class_type": "KSamplerSelect",
+    "_meta": { "title": "[10] Sampler" },
+    "inputs": { "sampler_name": "euler" }
+  },
+  "11": {
+    "class_type": "BasicScheduler",
+    "_meta": { "title": "[11] Scheduler / steps" },
+    "inputs": { "scheduler": "simple", "steps": 28, "denoise": 1.0, "model": ["1", 0] }
+  },
+  "12": {
+    "class_type": "BasicGuider",
+    "_meta": { "title": "[12] Guider" },
+    "inputs": { "model": ["1", 0], "conditioning": ["7", 0] }
+  },
+  "13": {
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": { "title": "[13] Sample" },
+    "inputs": {
+      "noise": ["9", 0],
+      "guider": ["12", 0],
+      "sampler": ["10", 0],
+      "sigmas": ["11", 0],
+      "latent_image": ["8", 0]
+    }
+  },
+  "14": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "[14] Decode" },
+    "inputs": { "samples": ["13", 0], "vae": ["3", 0] }
+  },
+  "15": {
+    "class_type": "UpscaleModelLoader",
+    "_meta": { "title": "[15] Load 4x upscaler" },
+    "inputs": { "model_name": "4x-UltraSharp.pth" }
+  },
+  "16": {
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": { "title": "[16] 4x upscale" },
+    "inputs": { "upscale_model": ["15", 0], "image": ["14", 0] }
+  },
+  "17": {
+    "class_type": "ImageScale",
+    "_meta": { "title": "[17] FINAL SIZE <- target_width/target_height" },
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 3840,
+      "height": 2160,
+      "crop": "center",
+      "image": ["16", 0]
+    }
+  },
+  "18": {
+    "class_type": "SaveImage",
+    "_meta": { "title": "[18] Save PNG <- filename_prefix" },
+    "inputs": { "filename_prefix": "vtt/battlemap", "images": ["17", 0] }
+  }
+}
