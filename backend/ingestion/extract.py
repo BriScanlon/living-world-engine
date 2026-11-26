@@ -39,22 +39,82 @@ class ExtractionResult(BaseModel):
     edges: list[ExtractedEdge] = Field(default_factory=list)
 
 
-SYSTEM = """You extract a knowledge graph from tabletop RPG campaign lore.
-Return nodes (Character, Faction, Location, Item, Monster, Goal, Event) and edges:
+SYSTEM = """You extract a knowledge graph from ONE passage of tabletop RPG campaign lore (the TEXT).
+Return only nodes and edges that the TEXT itself mentions or clearly implies:
+- nodes: Character, Faction, Location, Item, Monster, Goal, Event
 - WANTS / NEEDS / FEARS (source agent -> target node or target_text) with priority 0..1
 - CONTROLS / OWNS (source -> territory/resource/item)
 - RELATIONSHIP (source -> target) with trust -100..100 and a short label (ally, rival, debt, family...)
 - KNOWS / BELIEVES (agent -> node it is aware of) with confidence 0..1
 - MEMBER_OF (character -> faction), LOCATED_IN (character/item/location -> location)
-Infer plausible WANTS/NEEDS from motives described in the text. Use the exact names from KNOWN ENTITIES
-when the text refers to them (including by title or nickname) and list new nicknames as aliases."""
+Infer plausible WANTS/NEEDS from motives the TEXT describes.
+NAMES is a lookup table for naming only, not content to extract: when the TEXT refers to one of those entities
+(by name, title or nickname), use the exact name from NAMES and list a new nickname as an alias. Never return an
+entity from NAMES that the TEXT does not refer to. If the TEXT mentions nothing new, return empty lists."""
+
+MAX_NAMES = 60
+_CAPS = re.compile(r"\b[A-Z][\w'’-]+(?:\s+(?:of|the|de|von)?\s*[A-Z][\w'’-]+){0,4}")
+
+
+def relevant_names(chunk: str, resolver: EntityResolver, limit: int = MAX_NAMES) -> list[str]:
+    """Canonical names of known entities this chunk refers to: exact mentions of names and aliases first, then
+    fuzzy matches of its capitalised phrases ("the Baron" -> Lord Aldric Vane). Not the whole world."""
+    ids: list[str] = [m.doc_id for m in resolver.find_mentions(chunk)]
+    for phrase in _CAPS.findall(chunk):
+        if phrase not in STOP:
+            hit = resolver.resolve(phrase)
+            if hit:
+                ids.append(hit)
+    names: list[str] = []
+    for i in ids:
+        n = resolver.names.get(i)
+        if n and n not in names:
+            names.append(n)
+    return names[:limit]
 
 
 def llm_extract(chunk: str, known: list[str]) -> ExtractionResult:
     from llm.client import get_llm
 
-    user = json.dumps({"KNOWN ENTITIES": known[:300], "TEXT": chunk})
+    user = json.dumps({"TEXT": chunk, "NAMES": known[:MAX_NAMES]})
     return get_llm().structured(SYSTEM, user, ExtractionResult, temperature=0.1)
+
+
+def _words(s: str) -> str:
+    """Lower-case words separated by single spaces (punctuation and line breaks become spaces, not glue)."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", s.lower()).split())
+
+
+def _in_text(name: str, text: str) -> bool:
+    from ingestion.resolution import strip_honorifics
+    t = f" {_words(text)} "
+    return any(f" {k} " in t for k in {_words(name), _words(strip_honorifics(name))} if len(k) > 2)
+
+
+def ground(result: ExtractionResult, chunk: str, resolver: EntityResolver) -> ExtractionResult:
+    """Keep only what the chunk refers to. A node stays if its name or an alias occurs in the chunk, or it is a
+    known entity the chunk mentions; an edge stays if its source does and its target does or is any known entity.
+    Stops a model that copies the NAMES list (or invents) from writing those entities into the graph."""
+    mentioned = {m.doc_id for m in resolver.find_mentions(chunk)}
+
+    def grounded(name: str | None, aliases: list[str] = ()) -> bool:
+        if not name:
+            return False
+        if any(_in_text(s, chunk) for s in (name, *aliases)):
+            return True
+        hit = resolver.resolve(name)
+        return bool(hit and hit in mentioned)
+
+    nodes = [n for n in result.nodes if grounded(n.name, n.aliases)]
+    kept = {n.name for n in nodes}
+    edges = []
+    for e in result.edges:
+        src_ok = e.source in kept or grounded(e.source)
+        tgt_ok = (e.target is None and bool(e.target_text)) or (e.target is not None and (
+            e.target in kept or grounded(e.target) or resolver.resolve(e.target) is not None))
+        if src_ok and tgt_ok:
+            edges.append(e)
+    return ExtractionResult(nodes=nodes, edges=edges)
 
 
 # --------------------------------------------------------------------------- mock heuristic
@@ -122,5 +182,5 @@ def mock_extract(chunk: str, resolver: EntityResolver) -> ExtractionResult:
 
 def extract(chunk: str, resolver: EntityResolver) -> ExtractionResult:
     if get_settings().mock_llm:
-        return mock_extract(chunk, resolver)
-    return llm_extract(chunk, sorted(set(resolver.names.values())))
+        return mock_extract(chunk, resolver)  # works from the text alone, so nothing to ground
+    return ground(llm_extract(chunk, relevant_names(chunk, resolver)), chunk, resolver)

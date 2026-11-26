@@ -91,10 +91,11 @@ events = [e for e in w.of_type("Event") if e.get("visibility") in ("public", "le
 if events:
     run("rumor", lambda: llm.structured(prompts.RUMOR_SYSTEM, prompts.rumor_user(events, w), RumorBatch))
 if "extract" in wanted:
-    from ingestion.extract import llm_extract
+    from ingestion.extract import extract
+    from ingestion.resolution import EntityResolver
     notes = next((p for p in (Path("/app/sample_data"), BACKEND.parent / "sample_data") if p.exists()), None)
     text = (notes / "session-15-notes.md").read_text(encoding="utf-8")[:1800] if notes else DEMO_SESSION_SUMMARY
-    run("extract", lambda: llm_extract(text, sorted({d["name"] for d in w.all.values() if d.get("name")})[:120]))
+    run("extract", lambda: extract(text, EntityResolver(w.all.values())))  # the real path: names filter + grounding
 
 print("\nSUMMARY " + json.dumps(results), flush=True)
 ok = sum(r["ok"] for r in results.values())
