@@ -41,7 +41,8 @@ backend/
   atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet),
             service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
-  wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step)
+  wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step),
+            prose.py (real model rewrites template descriptions in a 6th `[setup] prose` commit; public facts only)
   srd/      srd_5_2_1.json (generated, CC-BY-4.0) + catalogue.py (lookups, biome bestiary, NPC templates,
             homebrew layer) + homebrew.py (DM's own creatures/peoples/items: library, import/export, world copies)
   vtt_link/ client.py (HTTP to the VTT), scene.py (Map links, footprints, DM scenes), session.py (map briefs,
@@ -161,7 +162,7 @@ target, or once it's held (`capped_goal_progress`): off-screen ticks stop one se
 
 ```bash
 docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
-cd backend && python -m pytest -q               # 99 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
+cd backend && python -m pytest -q               # 106 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
 ```
@@ -208,7 +209,7 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
 - The design doc with phases, status and future epics is a Claude artifact:
   `https://claude.ai/artifact/AbrrzUUhNba6zc2wuk8MwU` (World Atlas: Living World Engine × VTT, Design).
 
-## Status (2026-11-26)
+## Status (2026-11-27)
 
 Done and merged: engine core (forecast, briefing, merge/cherry-pick, time travel, ingestion), World Atlas (globe,
 Azgaar import, PMTiles), new-world wizard + SRD 5.2.1, VTT link (map footprints, DM scenes), world-aware AI maps,
@@ -216,12 +217,12 @@ portrait tokens, session log -> forecast, tokens on the table, party fog of war,
 travel times (roads, sea, SRD paces) in forecasts and atlas, zoom-in maps of any spot, durable forecast runs
 (survive restarts, resume). All six design phases done.
 
-Real-model fixes from the first GPU run are merged and their issues closed (#12 max tokens, #13 extraction echoing
-known entities, #14 SDK retries, #15 reasoning effort, #16 docs). Next: a full forecast on the real model
-(`qwen3.8:27b-16k`) with `scripts/forecast_check.py` on the GPU PC, then fix what it shows (slow or failing call
-types, empty or odd outcomes).
+Real model: forecasts run end to end on the GPU PC (`qwen3.8:27b-24k`, flash attention, `LLM_MAX_TOKENS=8192`,
+`forecast_check.py --days 9` passes in ~10 min). Fixed from those runs: #12–#16 (client, extraction, docs), #23
+(a live run resumed twice), #24 (arbiter context; grouped arbiter calls), #30 (goal clocks handing over lost
+conquests), #31 (diplomacy timed as army marches).
 
-Backlog: real map labels on the globe (needs bundled fonts/glyphs), LLM-written
-wizard prose, homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
+Backlog: real map labels on the globe (needs bundled fonts/glyphs), homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
 Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings;
-"Open in VTT" from the briefing (`place` on each event/rumor, `to-table` with `mark_visited: false`).
+"Open in VTT" from the briefing (`place` on each event/rumor, `to-table` with `mark_visited: false`); LLM-written
+wizard prose (`wizard/prose.py`).

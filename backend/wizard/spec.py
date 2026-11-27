@@ -106,7 +106,7 @@ def defaults(focus: str = "classic-realms") -> dict[str, Any]:
                      "species_mix": "mixed", "n_religions": 4},
         "local": {"town_name": "", "tavern_name": "", "local_factions": f["local_factions"], "n_notables": 5,
                   "party_name": "The Company", "macguffin_rarity": "Very Rare"},
-        "history": {"years_back": 600, "eras": 3, "cataclysm": f["cataclysm"], "saga": True,
+        "history": {"years_back": 600, "eras": 3, "cataclysm": f["cataclysm"], "saga": True, "prose": True,
                     "monster_density": f["monster_density"], "level_band": "1-4"},
     }
 
@@ -164,6 +164,8 @@ def spec() -> dict[str, Any]:
                  "options": {"low": "Few", "normal": "Normal", "high": "Many"}},
                 {"key": "level_band", "label": "Party level band (sets monster challenge)", "type": "select",
                  "options": {k: f"Levels {k}" for k in LEVEL_BANDS}},
+                {"key": "prose", "label": "Have the model write descriptions (real model only; a few minutes)",
+                 "type": "checkbox"},
             ]},
         },
         "rolls": {"world_name": ["The Shattered Reach", "Aldmere", "The Hollow Crown", "Vael", "Thessaly Reach",

@@ -307,7 +307,45 @@ def _build_world(answers: dict[str, Any], emit: Callable[..., None] | None, hb_e
     commit(5, "history", hist_docs, f"History: {hist['events']} events over {a['history']['years_back']} years, "
                                      f"{hist['monsters']} monster groups in {hist['wilds']} wilds")
     summary["town"] = town["name"]
+
+    # ------------------------------------------------------------------ prose (real model only)
+    if a["history"].get("prose", True):
+        summary["prose"] = write_world_prose(store, a, name, emit)
     return summary
+
+
+def write_world_prose(store: GraphStore, answers: dict[str, Any], world_name: str,
+                      emit: Callable[..., None]) -> dict[str, Any]:
+    """The model rewrites the template descriptions (``wizard.prose``); mock mode keeps them. One ``[setup] prose``
+    commit when anything changed. Never fails the build: a model that is down or replies badly keeps the templates."""
+    from llm import mock
+    from wizard import prose
+    s = get_settings()
+    if s.mock_llm:
+        resolve = lambda system, user: mock.wizard_prose(user)  # noqa: E731
+    else:
+        from llm.client import get_llm
+        resolve = lambda system, user: get_llm().structured(system, user, prose.ProseBatch, temperature=0.8)  # noqa: E731
+        emit("prose", "start", "Writing descriptions")
+    try:
+        changed, stats = prose.write_prose(
+            store.all_documents("main"), answers, world_name, resolve=resolve, concurrency=s.llm_concurrency,
+            progress=None if s.mock_llm else lambda n, of: emit("prose", "progress", f"Writing descriptions ({n}/{of})"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("Prose pass failed; the world keeps its template descriptions", exc_info=True)
+        if not s.mock_llm:
+            emit("prose", "done", f"Descriptions: kept the templates ({type(e).__name__})")
+        return {"written": 0, "error": f"{type(e).__name__}: {e}"}
+    if changed:
+        message = (f"Prose: {stats['written']} descriptions written by {s.llm_model}"
+                   + (f" ({stats['failed_batches']} of {stats['batches']} batches kept their templates)"
+                      if stats["failed_batches"] else ""))
+        store.upsert(changed, "main", f"[setup] prose: {message[len('Prose: '):]}")
+        if not s.mock_llm:
+            emit("prose", "done", message, {"documents": len(changed)})
+    elif not s.mock_llm:
+        emit("prose", "done", "Descriptions: kept the templates")
+    return stats
 
 
 # =========================================================================== step 4

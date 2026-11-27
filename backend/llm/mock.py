@@ -491,3 +491,12 @@ def rumors(events: list[dict], world: WorldView, *, seed: Any, round_no: int) ->
             out.append(RumorDraft(about_event=ev["@id"], location_id=venue["@id"], accuracy=accuracy,
                                   text=text, dialogue=f"\"{opener} {tail}\"", speaker=speaker))
     return RumorBatch(rumors=out)
+
+
+def wizard_prose(user: str):
+    """Mock twin of the wizard's prose pass: every entry keeps its template text, so mock worlds build unchanged."""
+    import json as _json
+
+    from wizard.prose import ProseBatch, ProseEntry
+    entries = _json.loads(user).get("entries", [])
+    return ProseBatch(entries=[ProseEntry(id=e["id"], text=e.get("placeholder") or "") for e in entries])
