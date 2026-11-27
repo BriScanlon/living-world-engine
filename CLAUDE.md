@@ -16,7 +16,7 @@ screen, with a DM-only screen fed by the engine. Everything runs in **mock mode*
 
 | Service | Port (host) | What |
 |---|---|---|
-| `terminusdb` | 6363 | TerminusDB v11.1.14, the graph store (admin / `root`) |
+| `terminusdb` | 127.0.0.1:6363 | TerminusDB v11.1.14, the graph store (admin / `root`); localhost only, not on the LAN |
 | `backend` | 8000 | FastAPI world engine (`backend/`), `/docs` for OpenAPI |
 | `frontend` | 5173 | React DM dashboard (`frontend/`), proxies `/api` to backend |
 | `vtt` | 8080 | VTT: FastAPI + SQLite + WebSockets, serves its built React app (`/dm`, `/table`) |
