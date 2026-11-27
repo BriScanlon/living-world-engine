@@ -152,9 +152,20 @@ A compiled LangGraph `StateGraph`:
    high-priority goal clock ticks during the round.
 4. **`run_agent_turns`** — BDI: each agent sees only its epistemic context and returns an
    `AgentIntent {action, target_id, resources_spent, reasoning, public_or_secret}`.
-5. **`world_arbiter`** — resolves simultaneous intents (contests by resources/influence,
-   relationships), emits `WorldEvent`s with relationship shifts, control changes, goal progress,
+5. **`world_arbiter`** — resolves simultaneous intents (contests by resources/influence, fighting
+   strength, relationships), emits `WorldEvent`s with relationship shifts, control changes, goal progress,
    new goals/fears, deaths, and knowledge gained; completed goal clocks fire consequences.
+
+   **Battle strength.** Attacks, seizures, thefts and sabotage weigh who actually fights
+   (`simulation/strength.py`). Each side's people and creatures get a challenge rating from their own
+   `challenge`, their `srd_ref` stat block (SRD or homebrew), a creature's `threat`, an NPC's role
+   ("Captain of the Watch" fights as a Guard Captain, a "Baron" as a Noble) or level, else a commoner. A side's
+   strength is `10 × log2(1 + XP/100)` over the SRD encounter XP of its units: a goblin is about 6, an ogre 25, a
+   troll 42, an adult dragon 75. The attacker brings its faction's people in the same settlement (a faction acting as a whole
+   musters everyone); the defender is the holder or rival with its people there, plus every creature at the place:
+   a lair always defends itself. The mock arbiter adds strength to its dice ("…and was beaten back. (Old Tam
+   (CR 0) against Troll (CR 5), Bog Rats x8 (CR 1/8).)"); the real arbiter gets the same `forces` in its prompt
+   and is told to weigh them heavily.
 6. **`propagate_rumors`** — public/leaked events become `Rumor`s in taverns/settlements with
    `accuracy` (True / Exaggerated / False) and a ready-to-read line of dialogue.
 

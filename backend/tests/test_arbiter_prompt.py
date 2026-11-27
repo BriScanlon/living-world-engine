@@ -17,6 +17,16 @@ class StubWorld:
     def of_type(self, t):
         return []
 
+    def get(self, i):
+        return self.docs.get(i)
+
+    def members_of(self, faction_id):
+        return []
+
+    @property
+    def all(self):
+        return self.docs
+
 
 def _intent(agent, target=None, reasoning="Because the docks are mine by right.", **kw):
     return {"agent_id": agent, "agent_name": agent.split("/")[-1], "action": "seize", "target_id": target,

@@ -336,21 +336,25 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
     lo, hi = state["rounds"][r]
     world = WorldView.load(c.store, state["branch"], day=hi)
     intents = state.get("intents", [])
+    from srd import catalogue, homebrew
+    layer = catalogue.homebrew(homebrew.overlay_entries(c.store))  # homebrew creatures' CR counts in clashes
     if not intents:
         result = ArbiterResult(events=[])
     elif c.mock:
-        result = mock.arbiter(intents, world, day=hi, seed=state["seed"], round_no=r)
+        with layer:
+            result = mock.arbiter(intents, world, day=hi, seed=state["seed"], round_no=r)
     else:
         # Related intents are resolved together, unrelated ones separately: smaller prompts and replies, and groups
         # run side by side when LLM_CONCURRENCY allows.
         groups = prompts.arbiter_groups(intents, world)
+        with layer:  # built here: the homebrew layer is a ContextVar, which worker threads don't inherit
+            users = [prompts.arbiter_user(g, world, hi) for g in groups]
 
-        def resolve(group: list[dict]) -> list[WorldEventDraft]:
-            return c.llm().structured(prompts.ARBITER_SYSTEM, prompts.arbiter_user(group, world, hi), ArbiterResult,
-                                      temperature=0.4).events
+        def resolve(user: str) -> list[WorldEventDraft]:
+            return c.llm().structured(prompts.ARBITER_SYSTEM, user, ArbiterResult, temperature=0.4).events
 
         with ThreadPoolExecutor(max_workers=max(1, min(len(groups), c.settings.llm_concurrency))) as pool:
-            result = ArbiterResult(events=[d for evs in pool.map(resolve, groups) for d in evs])
+            result = ArbiterResult(events=[d for evs in pool.map(resolve, users) for d in evs])
 
     drafts = list(result.events)
     # Time-driven goal clocks (the faction keeps working off-screen)

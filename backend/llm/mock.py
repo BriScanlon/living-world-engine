@@ -238,8 +238,17 @@ def _power(world: WorldView, intent: dict, rng: random.Random) -> float:
     return base + intent.get("resources_spent", 0) + rng.random() * 25
 
 
+def _odds(attacker: dict, defender: dict) -> str:
+    """" (Captain Brand (CR 4), Lord Vane (CR 1/8) against The Blackfen Hag (CR 6).)" for the event text."""
+    if not defender["units"]:
+        return ""
+    return f" ({', '.join(attacker['units'][:3]) or 'a handful'} against {', '.join(defender['units'][:3])}.)"
+
+
 def arbiter(intents: list[dict], world: WorldView, *, day: int, seed: Any, round_no: int) -> ArbiterResult:
+    from simulation.strength import Forces, force
     rng = rng_for(seed, round_no, "arbiter")
+    forces = Forces(world)
     events: list[WorldEventDraft] = []
     by_target: dict[str, list[dict]] = {}
     for it in intents:
@@ -282,10 +291,15 @@ def arbiter(intents: list[dict], world: WorldView, *, day: int, seed: Any, round
         gp = {goal: 1} if goal else {}
 
         if action in ("seize", "steal", "sabotage", "attack") and target:
-            atk = _power(world, it, rng)
-            dfn = _power(world, rival[0], rng) if rival else (
-                _power(world, {"agent_id": defender, "resources_spent": 5}, rng) if defender else 0)
+            # who fights: the actor's people against the holder's people there plus any creature in the place
+            place = target if target.startswith("Location/") else loc
+            atk_force = force(forces.side(actor, place))
+            def_force = force(forces.side(defender, place) + forces.lair(place))
+            atk = _power(world, it, rng) + atk_force["strength"]
+            dfn = (_power(world, rival[0], rng) if rival else (
+                _power(world, {"agent_id": defender, "resources_spent": 5}, rng) if defender else 0)) + def_force["strength"]
             success = atk >= dfn
+            odds = _odds(atk_force, def_force)
             for j, o in enumerate(intents):
                 if o in rival:
                     handled.add(j)
@@ -299,7 +313,7 @@ def arbiter(intents: list[dict], world: WorldView, *, day: int, seed: Any, round
                 events.append(WorldEventDraft(
                     title=title, event_type="conflict" if defender else "faction_move",
                     summary=(f"{aname} moved on {tname}" + (f" against {world.name(defender)}" if defender else "") +
-                             (" and took control." if success else ", but was driven back.")),
+                             (" and took control." if success else ", but was driven back.") + odds),
                     control_changes=[ControlChange(target_id=target, new_controller_id=faction_of(actor))] if success else [],
                     relationship_shifts=shifts, goal_progress={goal: 2} if (goal and success) else {},
                     resource_changes=spend, witnesses=witnesses(actor, defender, location=loc), **base))
@@ -330,7 +344,7 @@ def arbiter(intents: list[dict], world: WorldView, *, day: int, seed: Any, round
                 events.append(WorldEventDraft(
                     title=f"{aname} attacks {tname}", event_type="death" if killed else "conflict",
                     summary=f"{aname} struck at {tname}" + (", killing them." if killed else
-                                                           (" and came off better." if success else " and was beaten back.")),
+                                                           (" and came off better." if success else " and was beaten back.")) + odds,
                     killed_ids=killed, relationship_shifts=shifts + [RelationshipShift(
                         from_id=target, to_id=actor, delta=-35, reason="violence")] if target in world.docs else shifts,
                     resource_changes=spend, witnesses=witnesses(actor, target, location=loc), **base))

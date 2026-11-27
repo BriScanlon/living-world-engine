@@ -34,7 +34,8 @@ backend/
             world.py (WorldView: temporal + epistemic views), builders.py (doc constructors: entity, event, knows,
             relationship, end), briefing.py (4-part diff), seed.py (Greywater demo)
   simulation/ engine.py (LangGraph graph + nodes), models.py (Pydantic I/O for every LLM call), prompts.py,
-            mutations.py (Mutator: applies WorldEventDrafts as docs), runs.py (run registry on disk, SSE)
+            mutations.py (Mutator: applies WorldEventDrafts as docs), runs.py (run registry on disk, SSE),
+            strength.py (battle strength from challenge ratings: Forces.side/lair/contest)
   llm/      client.py (OpenAI-compatible structured client), mock.py (deterministic stand-ins for every call)
   ingestion/ markdown (Obsidian), documents (pypdf/docling), audio (whisper), extract.py (LLM -> graph), resolution
   atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet),
@@ -132,10 +133,16 @@ rumors.
   groups are packed into calls of at most `MAX_GROUP` (6) intents, run in parallel up to `LLM_CONCURRENCY`; intents
   reach it through `brief_intent()` (no empty fields, reasoning capped at 200 chars). Mock mode calls
   `mock.arbiter` once per round as before.
+- **Battle strength** (`simulation/strength.py`): hostile intents (seize/steal/sabotage/attack) get attacker and
+  defender forces, strength = `10*log2(1+XP/100)` over SRD encounter XP by CR (own `challenge` > `srd_ref` >
+  Monster `threat` > NPC role via `ROLE_TEMPLATES`/`ROLE_WORDS` > level/2 > commoner). The mock arbiter adds it to
+  `_power`; `arbiter_user` adds a `forces` list. `world_arbiter` builds prompts on the main thread inside the
+  homebrew layer (ContextVars don't reach the pool's threads), so homebrew CRs count.
 - Five call sites, each with a mock twin in `llm/mock.py`: session delta, agent intent, arbiter, rumors
   (`simulation/engine.py`), lore extraction (`ingestion/extract.py`). The VTT has its own optional LLM (prompt
   expansion) behind `VTT_MOCK_AI_PIPELINE`.
-- **Status: smoke-tested, not yet through a full forecast.** `scripts/llm_smoke.py` checks all five calls
+- **Status: whole forecasts run on the real model** (24K context, before the #26 arbiter split; the split is
+  not yet checked on 16K). `scripts/llm_smoke.py` checks all five calls
   (`docker compose exec backend python /app/scripts/llm_smoke.py [json_schema|json_object|none] [calls…]`). First
   run on a 7900 XT (20 GB) with native Windows ROCm Ollama, `qwen2.5:14b-instruct`, 32K context, `json_schema`:
   4/5 pass in 3 to 8 s each; extraction copies the KNOWN ENTITIES list (issue #13). The user has since moved that
@@ -152,7 +159,7 @@ rumors.
 
 ```bash
 docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
-cd backend && python -m pytest -q               # 58 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
+cd backend && python -m pytest -q               # 80 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
 ```
@@ -208,7 +215,6 @@ known entities, #14 SDK retries, #15 reasoning effort, #16 docs). Next: a full f
 (`qwen3.8:27b-16k`) with `scripts/forecast_check.py` on the GPU PC, then fix what it shows (slow or failing call
 types, empty or odd outcomes).
 
-Backlog: real map labels on the globe (needs bundled fonts/glyphs), battle strength from SRD challenge ratings,
-"Open in VTT" from the briefing, LLM-written
+Backlog: real map labels on the globe (needs bundled fonts/glyphs), "Open in VTT" from the briefing, LLM-written
 wizard prose, homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
-Done since: the homebrew catalogue epic (library, overlay, wizard, editor).
+Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings.
