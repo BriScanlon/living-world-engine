@@ -34,7 +34,7 @@ backend/
             world.py (WorldView: temporal + epistemic views), builders.py (doc constructors: entity, event, knows,
             relationship, end), briefing.py (4-part diff), seed.py (Greywater demo)
   simulation/ engine.py (LangGraph graph + nodes), models.py (Pydantic I/O for every LLM call), prompts.py,
-            mutations.py (Mutator: applies WorldEventDrafts as docs), runs.py (in-memory run registry, SSE)
+            mutations.py (Mutator: applies WorldEventDrafts as docs), runs.py (run registry on disk, SSE)
   llm/      client.py (OpenAI-compatible structured client), mock.py (deterministic stand-ins for every call)
   ingestion/ markdown (Obsidian), documents (pypdf/docling), audio (whisper), extract.py (LLM -> graph), resolution
   atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet),
@@ -90,7 +90,15 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world)
 `fork_canon -> apply_session_delta -> [select_active_agents -> run_agent_turns -> world_arbiter -> propagate_rumors]
 x rounds -> finalize`. Rounds cover `ROUND_LENGTH_DAYS` each up to `MAX_ROUNDS`; activation is goal clocks plus
 `ACTIVATION_HOPS` hops from what changed. Each node commits to the forecast branch (the branch log is the audit
-trail). Travel: an actor acting on a far place arrives `lo + travel days` (army pace for factions in
+trail).
+
+**Durable runs** (`simulation/runs.py`): every run is a JSON file in `RUNS_DIR` (default `runs/` beside the atlas
+folder) holding its request, campaign, status, events, result and a checkpoint: the merged `SimState` after the last
+finished node plus the next node (`node()` wrapper writes it; `ADDITIVE` keys are appended like LangGraph's
+reducers). On start-up, `queued`/`running` runs become `interrupted`. `resume_forecast(id)` (`POST
+/api/forecasts/{id}/resume`) restarts the graph at the checkpoint's next node through a conditional START edge
+(`resume_at`), on the run's own campaign. Re-running a cut-off node is safe because writes use deterministic ids.
+A new node must be added to `NEXT`/`_next_node`, or resumes will route wrongly. Travel: an actor acting on a far place arrives `lo + travel days` (army pace for factions in
 conflict/faction_move; summary gets "(A journey of N days.)"); rumors land at `event day + news travel days`, and
 locals believe from then. Events/rumors may land after the window (future-dated); out-of-window events spawn no
 rumors.
@@ -121,7 +129,7 @@ rumors.
 
 ```bash
 docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
-cd backend && python -m pytest -q               # 44 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
+cd backend && python -m pytest -q               # 58 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
 ```
@@ -169,13 +177,14 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
 Done and merged: engine core (forecast, briefing, merge/cherry-pick, time travel, ingestion), World Atlas (globe,
 Azgaar import, PMTiles), new-world wizard + SRD 5.2.1, VTT link (map footprints, DM scenes), world-aware AI maps,
 portrait tokens, session log -> forecast, tokens on the table, party fog of war, party overland map on the table,
-travel times (roads, sea, SRD paces) in forecasts and atlas, zoom-in maps of any spot. All six design phases done.
+travel times (roads, sea, SRD paces) in forecasts and atlas, zoom-in maps of any spot, durable forecast runs
+(survive restarts, resume). All six design phases done.
 
-Real-model work is tracked in GitHub issues (#12 max tokens, #13 extraction echoing known entities, #14 SDK
-retries, #15 reasoning effort + qwen3.8 vs qwen2.5 comparison, #16 these docs). Next: a full forecast on the real
-model.
+Real-model fixes from the first GPU run are merged and their issues closed (#12 max tokens, #13 extraction echoing
+known entities, #14 SDK retries, #15 reasoning effort, #16 docs). Next: a full forecast on the real model
+(`qwen3.8:27b-16k`), now that a long run can survive a restart.
 
 Backlog: real map labels on the globe (needs bundled fonts/glyphs), battle strength from SRD challenge ratings,
-forecast runs surviving a backend restart (registry is in memory), "Open in VTT" from the briefing, LLM-written
+"Open in VTT" from the briefing, LLM-written
 wizard prose; epics: homebrew catalogue (custom creatures/species/items beside the SRD), native world generation
 instead of Azgaar.
