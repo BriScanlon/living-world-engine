@@ -90,8 +90,14 @@ export interface Ref {
   name: string;
 }
 
+/** Where a briefing item happened, and how many battle maps are linked there (for "Open in VTT"). */
+export interface PlaceRef extends Ref {
+  maps: number;
+}
+
 export interface EventBrief {
   id: string;
+  place: PlaceRef | null;
   title: string;
   summary: string;
   day: number;
@@ -140,6 +146,7 @@ export interface Rumor {
   accuracy: "True" | "Exaggerated" | "False";
   day: number;
   location: Ref;
+  place: PlaceRef;
   about_event: { id: string; title: string } | null;
 }
 
@@ -438,7 +445,7 @@ export const api = {
     req<{ map: string }>(`/places/${placeId}/maps`, json(body)),
   unlinkMap: (mapId: string, branch: string, day: number | null) =>
     req<any>(`/maps/${mapId}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`, { method: "DELETE" }),
-  toTable: (placeId: string, body: { branch: string; day: number | null; map_doc_id?: string | null }) =>
+  toTable: (placeId: string, body: { branch: string; day: number | null; map_doc_id?: string | null; mark_visited?: boolean }) =>
     req<{ map: LinkedMap | null; scene: { place: string; people: number; rumors: number; creatures: number } }>(
       `/places/${placeId}/to-table`, json(body)),
   srdInfo: () => req<{ attribution: string; license: string; counts: Record<string, number> }>("/srd"),

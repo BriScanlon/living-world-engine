@@ -159,7 +159,7 @@ rumors.
 
 ```bash
 docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
-cd backend && python -m pytest -q               # 80 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
+cd backend && python -m pytest -q               # 81 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
 ```
@@ -215,6 +215,7 @@ known entities, #14 SDK retries, #15 reasoning effort, #16 docs). Next: a full f
 (`qwen3.8:27b-16k`) with `scripts/forecast_check.py` on the GPU PC, then fix what it shows (slow or failing call
 types, empty or odd outcomes).
 
-Backlog: real map labels on the globe (needs bundled fonts/glyphs), "Open in VTT" from the briefing, LLM-written
+Backlog: real map labels on the globe (needs bundled fonts/glyphs), LLM-written
 wizard prose, homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
-Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings.
+Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings;
+"Open in VTT" from the briefing (`place` on each event/rumor, `to-table` with `mark_visited: false`).

@@ -189,3 +189,32 @@ def test_session_log_becomes_the_next_forecast_summary(vtt):
                                                "- The party torched the Guild warehouse.",
                                                "- The party went to Vane Manor."]
     assert (out["start_day"], out["end_day"], out["notes"]) == (14, 15, 1)
+
+
+def test_open_in_vtt_from_the_briefing(world, vtt):
+    """Each briefing event knows where it happened and whether a battle map is linked there; opening it puts that
+    place on the VTT as it stands on the forecast branch, without marking the party's map."""
+    from graph import builders as b
+    from graph.briefing import build_briefing
+    from vtt_link.scene import link_map, to_table
+
+    br = f"forecast/vtt-brief-{uuid.uuid4().hex[:6]}"
+    world.create_branch(br)
+    link_map(world, "Location/greywater-docks", "map-docks", branch=br, day=10)
+    world.upsert([
+        b.event("Smugglers at the docks", "Crates go missing.", day=11, event_type="npc_action",
+                actors=["Character/sela-marrow"], location="Location/greywater-docks"),
+        b.event("A threat delivered", "A note under the door.", day=12, event_type="npc_action",
+                actors=["Character/sela-marrow"], targets=["Character/lord-aldric-vane"]),  # no location: where he is
+    ], br, "[forecast] test events")
+    brief = build_briefing(world, "main", br)
+    by = {e["title"]: e["place"] for e in brief["offscreen"]}
+    assert by["Smugglers at the docks"] == {"id": "Location/greywater-docks", "name": "Greywater Docks", "maps": 1}
+    assert by["A threat delivered"]["id"] == "Location/vane-manor" and by["A threat delivered"]["maps"] == 0
+
+    before = len(world.all_documents(br))
+    out = to_table(world, "Location/greywater-docks", br, 11, mark_visited=False)
+    assert out["map"]["vtt_map_id"] == "map-docks" and vtt.pushed[-1] == "map-docks"
+    assert vtt.scenes[-1]["branch"] == br and vtt.scenes[-1]["day"] == 11
+    assert not out["visited"] and len(world.all_documents(br)) == before  # a preview writes nothing
+    world.delete_branch(br)

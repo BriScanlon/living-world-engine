@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, Branch, Briefing as BriefingT, EventBrief } from "../api";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { api, Branch, Briefing as BriefingT, EventBrief, PlaceRef } from "../api";
 import {
   accuracyTone, Badge, Button, Card, Clock, cx, Empty, ErrorBox, inputCls, signed, Spinner, TrustBar, visibilityTone,
 } from "../ui";
 
 type Tab = "ripples" | "offscreen" | "shifts" | "rumors" | "intents" | "raw";
+
+/** The forecast branch being briefed, when a VTT is connected: "Open in VTT" buttons show only then. */
+const VttBranch = createContext<string | null>(null);
 
 export default function Briefing({ branches, selected, onSelect, onChanged }: {
   branches: Branch[];
@@ -21,6 +24,11 @@ export default function Briefing({ branches, selected, onSelect, onChanged }: {
   const [tab, setTab] = useState<Tab>("ripples");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  const [vtt, setVtt] = useState(false);
+
+  useEffect(() => {
+    api.vttStatus().then((s) => setVtt(s.configured)).catch(() => setVtt(false));
+  }, []);
 
   const running = current?.live?.status === "running" || current?.live?.status === "queued";
 
@@ -157,7 +165,7 @@ export default function Briefing({ branches, selected, onSelect, onChanged }: {
       {loading && <div className="flex items-center gap-2 text-sm text-ink-400"><Spinner /> Diffing branches…</div>}
 
       {data && !running && (
-        <>
+        <VttBranch.Provider value={vtt ? data.compare : null}>
           <nav className="scroll-thin flex gap-1 overflow-x-auto border-b border-ink-800">
             {tabs.map((t) => (
               <button
@@ -178,9 +186,46 @@ export default function Briefing({ branches, selected, onSelect, onChanged }: {
           {tab === "rumors" && <Rumors data={data} />}
           {tab === "intents" && <Intents data={data} />}
           {tab === "raw" && <RawDiff compare={data.compare} />}
-        </>
+        </VttBranch.Provider>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------- open in VTT
+/** Put the place where something happened on the VTT as it stands on the forecast branch that day: its battle map on
+ * the table (if one is linked) and its scene on the DM screen. A preview: the place is not marked visited. */
+function OpenInVtt({ place, day }: { place: PlaceRef | null | undefined; day: number }) {
+  const branch = useContext(VttBranch);
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [msg, setMsg] = useState("");
+  if (!branch || !place) return null;
+  const send = async () => {
+    setState("busy");
+    try {
+      const r = await api.toTable(place.id, { branch, day, mark_visited: false });
+      setState("done");
+      setMsg(r.map ? `${r.map.name} on the table, scene on the DM screen` : "Scene on the DM screen (no battle map here)");
+    } catch (e) {
+      setState("error");
+      setMsg((e as Error).message);
+    }
+  };
+  const tip = `Show ${place.name} as of day ${day} on this branch: ` +
+    (place.maps ? "its battle map on the table and its scene on the DM screen" : "no battle map is linked, so just its scene on the DM screen");
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs">
+      <button
+        onClick={send}
+        disabled={state === "busy"}
+        title={tip}
+        className="inline-flex items-center gap-1 rounded-md border border-ink-700 px-1.5 py-0.5 text-ink-300 hover:border-ember-500/60 hover:text-ember-300 disabled:opacity-50"
+      >
+        {state === "busy" ? <Spinner /> : place.maps ? "▦" : "▢"} Open in VTT
+      </button>
+      {state === "done" && <span className="text-emerald-300">{msg}</span>}
+      {state === "error" && <span className="text-rose-300">{msg}</span>}
+    </span>
   );
 }
 
@@ -194,6 +239,7 @@ function EventLine({ ev, depth = 0 }: { ev: EventBrief; depth?: number }) {
           <Badge>day {ev.day}</Badge>
           <span className="text-sm font-medium text-ink-100">{ev.title}</span>
           <Badge tone={visibilityTone(ev.visibility)}>{ev.visibility}</Badge>
+          <OpenInVtt place={ev.place} day={ev.day} />
         </div>
         {ev.summary && <p className="mt-1 text-sm text-ink-300">{ev.summary}</p>}
         {ev.reasoning && <p className="mt-1 text-sm italic text-ink-400">“{ev.reasoning}”</p>}
@@ -209,7 +255,10 @@ function Ripples({ data }: { data: BriefingT }) {
     <div className="grid gap-4 xl:grid-cols-2">
       {data.ripples.map((r) => (
         <Card key={r.id} className="border-ember-600/40">
-          <div className="text-xs font-medium uppercase tracking-wide text-ember-300">Party action · day {r.day}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-ember-300">Party action · day {r.day}</div>
+            <OpenInVtt place={r.place} day={r.day} />
+          </div>
           <h3 className="mt-1 font-display text-lg text-ink-100">{r.title}</h3>
           <p className="mt-1 text-sm text-ink-300">{r.summary}</p>
           <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
@@ -271,6 +320,7 @@ function Offscreen({ data, picked, setPicked }: { data: BriefingT; picked: Set<s
                       <Badge tone="slate">{e.event_type.replace("_", " ")}</Badge>
                       <Badge tone={visibilityTone(e.visibility)}>{e.visibility}</Badge>
                       {e.location && <span className="text-xs text-ink-400">@ {e.location.name}</span>}
+                      <OpenInVtt place={e.place} day={e.day} />
                     </div>
                     <p className="mt-0.5 text-sm text-ink-300">{e.summary}</p>
                     {e.reasoning && <p className="mt-0.5 text-xs italic text-ink-400">“{e.reasoning}”</p>}
@@ -446,7 +496,10 @@ function Rumors({ data }: { data: BriefingT }) {
               <figcaption className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink-400">
                 <span>— {r.speaker ?? "someone"}, {r.location.name}, day {r.day}</span>
                 <Badge tone={accuracyTone(r.accuracy)}>{r.accuracy}</Badge>
-                <button className="ml-auto text-ember-300 hover:text-ember-400" onClick={() => navigator.clipboard?.writeText(r.dialogue)}>copy</button>
+                <span className="ml-auto flex items-center gap-2">
+                  <OpenInVtt place={r.place} day={r.day} />
+                  <button className="text-ember-300 hover:text-ember-400" onClick={() => navigator.clipboard?.writeText(r.dialogue)}>copy</button>
+                </span>
               </figcaption>
               {r.about_event && <div className="mt-1 text-xs text-ink-400">Truth: {r.about_event.title}</div>}
             </figure>

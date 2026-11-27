@@ -320,6 +320,12 @@ link off). The link is push-only, so the VTT never needs to know about TerminusD
   scene to the DM screen for the chosen branch and day: holder, province and realm; who is there with what they want
   and fear; tensions; rumors to read aloud; creatures and NPC stat lines from the SRD; recent non-secret events; and
   plans in motion. Players never receive it.
+* **Open in VTT from the briefing.** Every forecast event and rumor carries the place where it happened (its
+  location, else a place it targets, else where its target is: a person's location, a faction's headquarters). Its
+  **Open in VTT** button (▦ when a battle map is linked there, ▢ when not) shows that place as it stands on the
+  forecast branch on the event's day: the map on the table and the scene on the DM screen. It's a preview, so the
+  place is not marked visited (`mark_visited: false`) and nothing is written to the branch. The buttons appear only
+  when a VTT is configured.
 * **Maps follow the world.** *Paint it as it is* builds a map brief from world state on that branch and day (what
   the place is, who holds it, what has happened there lately; secret events are left out because the map goes on
   the players' table). You can edit the brief before the VTT paints it, and the finished map is linked from that day,
@@ -369,7 +375,7 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/vtt/status` · `/api/vtt/maps` · `/api/vtt/media/{path}` | tabletop link status, its maps, proxied thumbnails |
 | GET · POST | `/api/places/{id}/maps` | maps linked to a place · link one `{vtt_map_id, day, branch, kind, rotation_deg}` |
 | DELETE | `/api/maps/{id}` | unlink (ends the map on that day) |
-| GET · POST | `/api/places/{id}/scene` · `/api/places/{id}/to-table` | preview the DM scene · push map + scene to the VTT |
+| GET · POST | `/api/places/{id}/scene` · `/api/places/{id}/to-table` | preview the DM scene · push map + scene to the VTT (`mark_visited: false` for a preview) |
 | GET · POST | `/api/places/{id}/map-brief` · `/api/places/{id}/paint-map` | map brief from world state · have the VTT paint it |
 | GET | `/api/vtt/jobs/{job}/collect` | paint progress; links the finished map from its day |
 | POST | `/api/places/{id}/tokens` | portrait tokens for the people at a place |
