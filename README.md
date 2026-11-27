@@ -35,7 +35,7 @@ docker compose up --build
 | DM dashboard | http://localhost:5173 |
 | Backend API (OpenAPI docs) | http://localhost:8000/docs |
 | Virtual tabletop: DM screen · player table | http://localhost:8080/dm · http://localhost:8080/table |
-| TerminusDB dashboard (admin / `root`) | http://localhost:6363 |
+| TerminusDB dashboard (admin / `root`; this machine only) | http://localhost:6363 |
 
 On first start the backend creates the `living_world` database, applies the schema and seeds
 **Greywater**, a small harbour town (see [Demo world](#demo-world)). Then:
@@ -56,6 +56,11 @@ On first start the backend creates the `living_world` database, applies the sche
    press **From the table** to pull it into the next forecast's summary.
 
 Ports already in use? Override `FRONTEND_PORT`, `BACKEND_PORT`, `TERMINUSDB_PORT` in `.env`.
+
+**Across the LAN:** the dashboard, API and VTT listen on every interface, so other devices use this machine's
+address (`http://<lan-ip>:5173`, `http://<lan-ip>:8080/dm` · `/table`). There is no login, so do this on a trusted
+network only. TerminusDB is bound to `127.0.0.1`: it holds the whole world behind a default password, and only
+the backend (over the compose network) and local tools need it.
 
 Re-seed from scratch (deletes all branches):
 
