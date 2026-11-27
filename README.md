@@ -385,6 +385,9 @@ LLM_TIMEOUT_SECONDS=300
 * **VRAM.** `ollama ps` must show `100% GPU`. Another model resident on the same card (a second Ollama, a long
   keep-alive) pushes the model into shared system memory: under 1 token/s instead of 50 to 64, and large contexts
   fail to allocate. Windows Task Manager shows dedicated VRAM.
+* **Don't quantize the KV cache for JSON.** `OLLAMA_KV_CACHE_TYPE=q8_0` would fit a longer context, but it breaks
+  Ollama's JSON-schema grammar for qwen3.8 (every request fails on its first token, `Unexpected empty grammar stack`,
+  and comes back as HTTP 200 with empty content). `OLLAMA_FLASH_ATTENTION=1` is fine.
 * **AMD on Windows: run Ollama natively, not in a container.** Under Docker Desktop / WSL2 the GPU is exposed only
   as `/dev/dxg` (no `/dev/kfd`), so the `ollama/ollama:rocm` image can't use it; the native Windows build (ROCm)
   detects the card (gfx1100) and the backend container reaches it through `host.docker.internal`.
@@ -405,6 +408,13 @@ is logged (`docker compose logs backend`) with its wall time, finish reason and 
 First run, `qwen2.5:14b-instruct` at 32K context (15 GB VRAM, 50 to 64 tokens/s), `json_schema`: session notes,
 agent, arbiter and rumors each validated in 3 to 8 s; lore extraction ran away, copying the KNOWN ENTITIES list
 instead of reading the text (issue #13). A 4B model on CPU was too slow to finish a single call.
+
+The biggest prompt is the world arbiter's, which resolves every NPC's intent for a round. It is kept small: payloads
+are compact JSON, intents are trimmed, and in `json_schema` mode the prompt carries a one-line outline of the reply
+instead of the whole schema (the server enforces it). Intents that touch the same agents, targets or controllers are
+resolved together; unrelated ones are packed into calls of at most six intents, so 16 intents take three calls of
+about 6K characters each instead of one prompt of 13K tokens. If a reply is cut off by the **context window** (it
+stops well short of `LLM_MAX_TOKENS`), the error says so, with the prompt's size, and doesn't waste more attempts.
 
 Once every call passes, run a whole forecast. `scripts/forecast_check.py` forecasts the current campaign on the
 real model (one round by default), printing each step as it runs, then a report: every model call type with its

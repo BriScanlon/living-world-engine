@@ -341,9 +341,16 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
     elif c.mock:
         result = mock.arbiter(intents, world, day=hi, seed=state["seed"], round_no=r)
     else:
-        payload = [{k: v for k, v in i.items() if k not in ("round",)} for i in intents]
-        result = c.llm().structured(prompts.ARBITER_SYSTEM, prompts.arbiter_user(payload, world, hi), ArbiterResult,
-                                    temperature=0.4)
+        # Related intents are resolved together, unrelated ones separately: smaller prompts and replies, and groups
+        # run side by side when LLM_CONCURRENCY allows.
+        groups = prompts.arbiter_groups(intents, world)
+
+        def resolve(group: list[dict]) -> list[WorldEventDraft]:
+            return c.llm().structured(prompts.ARBITER_SYSTEM, prompts.arbiter_user(group, world, hi), ArbiterResult,
+                                      temperature=0.4).events
+
+        with ThreadPoolExecutor(max_workers=max(1, min(len(groups), c.settings.llm_concurrency))) as pool:
+            result = ArbiterResult(events=[d for evs in pool.map(resolve, groups) for d in evs])
 
     drafts = list(result.events)
     # Time-driven goal clocks (the faction keeps working off-screen)

@@ -1,4 +1,8 @@
-"""Prompt builders for the real-LLM path (OpenAI-compatible)."""
+"""Prompt builders for the real-LLM path (OpenAI-compatible).
+
+Payloads are compact JSON (no indentation: about a fifth fewer tokens), and the arbiter is fed one group of related
+intents at a time (``arbiter_groups``), so its prompt and reply stay well inside a 16K context.
+"""
 from __future__ import annotations
 
 import json
@@ -30,7 +34,15 @@ WorldEvents with their consequences: relationship_shifts (trust deltas), control
 (rarely), goal_progress (goal id -> segments), resource_changes (faction id -> delta), witnesses (agent ids
 who learn of it), new_goals / new_desires (motivation shifts), knowledge_gained.
 Use ONLY ids that appear in the input. Use the round's day for every event. Keep summaries to 1-2 sentences.
+Give each event the agent ids whose intents produced it (from_intents); one event per intent is usually enough.
 visibility: public (everyone nearby sees), secret (only participants), leaked (secret but got out)."""
+
+REASONING_CHARS = 200  # an intent's reasoning as the arbiter sees it
+MAX_GROUP = 6  # intents resolved in one arbiter call
+
+
+def _dump(obj: Any) -> str:
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, default=str)
 
 RUMOR_SYSTEM = """You write tavern rumors for a tabletop RPG game master.
 For each public or leaked event, write 1 rumor heard at the given venue. Mix accuracy: roughly half
@@ -44,16 +56,67 @@ def catalogue(world: WorldView) -> list[dict[str, Any]]:
 
 
 def session_delta_user(summary: str, world: WorldView, start_day: int, end_day: int) -> str:
-    return json.dumps({
+    return _dump({
         "session_days": [start_day, end_day],
         "party_id": (world.party or {}).get("@id"),
         "catalogue": catalogue(world),
         "session_summary": summary,
-    }, indent=1)
+    })
 
 
 def agent_user(ctx: dict[str, Any], day: int, round_days: tuple[int, int]) -> str:
-    return json.dumps({"today": day, "round_covers_days": list(round_days), "you": ctx}, indent=1, default=str)
+    return _dump({"today": day, "round_covers_days": list(round_days), "you": ctx})
+
+
+def brief_intent(intent: dict[str, Any]) -> dict[str, Any]:
+    """An intent as the arbiter needs it: no empty fields, reasoning capped."""
+    out = {k: v for k, v in intent.items() if v not in (None, "", [], {}) and k != "round"}
+    if len(out.get("reasoning") or "") > REASONING_CHARS:
+        out["reasoning"] = out["reasoning"][:REASONING_CHARS - 1].rstrip() + "…"
+    return out
+
+
+def arbiter_groups(intents: list[dict], world: WorldView, max_group: int | None = None) -> list[list[dict]]:
+    """Split intents into groups that must be resolved together: two intents belong together if they share an agent,
+    a target, or the target's controller (two factions grabbing the same docks, a thief and the vault's owner).
+    Each returned list is one arbiter call of at most ``max_group`` intents: a related group always shares a call,
+    and small unrelated groups are packed together. A related group bigger than ``max_group`` is cut into chunks
+    (joint resolution is lost only between chunks of one very crowded clash)."""
+    max_group = max_group or MAX_GROUP
+    parent = list(range(len(intents)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict[str, int] = {}
+    for idx, it in enumerate(intents):
+        keys = {it.get("agent_id"), it.get("target_id")}
+        if it.get("target_id"):
+            keys.add(world.controller_of(it["target_id"]))
+        for k in keys - {None}:
+            if k in owner:
+                parent[find(idx)] = find(owner[k])
+            else:
+                owner[k] = idx
+    groups: dict[int, list[dict]] = {}
+    for idx, it in enumerate(intents):
+        groups.setdefault(find(idx), []).append(it)
+    chunks: list[list[dict]] = []
+    for g in groups.values():
+        chunks += [g[i:i + max_group] for i in range(0, len(g), max_group)]
+    # Pack small unrelated groups into shared calls (first fit, biggest first): a related group is never split
+    # across calls, and each call holds at most max_group intents, so a round needs a few calls, not one per NPC.
+    calls: list[list[dict]] = []
+    for chunk in sorted(chunks, key=len, reverse=True):
+        slot = next((c for c in calls if len(c) + len(chunk) <= max_group), None)
+        if slot is None:
+            calls.append(list(chunk))
+        else:
+            slot.extend(chunk)
+    return calls
 
 
 def arbiter_user(intents: list[dict], world: WorldView, day: int) -> str:
@@ -65,8 +128,8 @@ def arbiter_user(intents: list[dict], world: WorldView, day: int) -> str:
         if ctl:
             involved.add(ctl)
     state = {
-        "entities": [{k: v for k, v in world.docs[i].items() if k in
-                      ("@id", "@type", "name", "resources", "influence", "faction", "location", "role")}
+        "entities": [{k: v for k, v in world.docs[i].items() if v is not None and k in
+                      ("@id", "name", "resources", "influence", "faction", "location", "role")}
                      for i in sorted(involved) if i in world.docs],
         "controls": [{"from": e["from_id"], "kind": e["kind"], "target": e["target_id"]}
                      for e in world.of_type("ControlEdge") if e["target_id"] in involved or e["from_id"] in involved],
@@ -77,7 +140,7 @@ def arbiter_user(intents: list[dict], world: WorldView, day: int) -> str:
                           "clock": f"{g['clock_progress']}/{g['clock_segments']}"}
                          for g in world.of_type("Goal") if g.get("status") == "active" and g["owner"] in involved],
     }
-    return json.dumps({"day": day, "intents": intents, "world": state}, indent=1, default=str)
+    return _dump({"day": day, "intents": [brief_intent(i) for i in intents], "world": state})
 
 
 def rumor_user(events: list[dict], world: WorldView) -> str:
@@ -86,4 +149,4 @@ def rumor_user(events: list[dict], world: WorldView) -> str:
     locals_ = [{"name": c["name"], "location": c.get("location")} for c in world.of_type("Character")]
     evs = [{"id": e["@id"], "title": e["name"], "summary": e.get("summary"), "visibility": e.get("visibility"),
             "location": e.get("location"), "actors": [world.name(a) for a in e.get("actors", [])]} for e in events]
-    return json.dumps({"events": evs, "venues": venues, "locals": locals_}, indent=1)
+    return _dump({"events": evs, "venues": venues, "locals": locals_})
