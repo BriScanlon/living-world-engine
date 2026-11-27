@@ -24,7 +24,7 @@ import socket
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +128,10 @@ class RunRegistry:
 
     def _read(self, run_id: str) -> Run | None:
         try:
-            return Run(**json.loads(self._path(run_id).read_text(encoding="utf-8")))
+            data = json.loads(self._path(run_id).read_text(encoding="utf-8"))
+            known = {f.name for f in fields(Run)}
+            # Fields a newer version added are ignored, so mixed versions sharing the run files can still read them
+            return Run(**{k: v for k, v in data.items() if k in known})
         except (OSError, ValueError, TypeError):
             return None
 

@@ -212,3 +212,14 @@ def test_heartbeat_keeps_a_long_step_alive(monkeypatch, runs_dir):
     assert run.heartbeat_age < 1
     saved = json.loads((runs_dir / f"{run.id}.json").read_text(encoding="utf-8"))
     assert time.time() - saved["heartbeat_at"] < 1
+
+
+def test_run_files_from_a_newer_version_still_load(runs_dir):
+    run = registry.create("forecast/newer", {"session_number": 1})
+    registry.set_status(run, "complete")
+    path = runs_dir / f"{run.id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["field_from_the_future"] = {"x": 1}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    registry.reload()
+    assert registry.get(run.id).status == "complete"
