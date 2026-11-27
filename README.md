@@ -406,6 +406,19 @@ First run, `qwen2.5:14b-instruct` at 32K context (15 GB VRAM, 50 to 64 tokens/s)
 agent, arbiter and rumors each validated in 3 to 8 s; lore extraction ran away, copying the KNOWN ENTITIES list
 instead of reading the text (issue #13). A 4B model on CPU was too slow to finish a single call.
 
+Once every call passes, run a whole forecast. `scripts/forecast_check.py` forecasts the current campaign on the
+real model (one round by default), printing each step as it runs, then a report: every model call type with its
+count, failures and mean/max seconds; the events, intents and rumors that came out, plus samples to read; and the
+forecast branch, which stays in the campaign so you can open its DM Briefing (discard it when done).
+
+```bash
+docker compose exec backend python /app/scripts/forecast_check.py              # 1 round, the demo session notes
+docker compose exec backend python /app/scripts/forecast_check.py --days 9     # 3 rounds of 3 days
+docker compose exec backend python /app/scripts/forecast_check.py --summary /app/sample_data/session-15-notes.md
+```
+
+It is an ordinary durable run: if it stops, it shows under *Unfinished forecasts* and can be resumed there.
+
 ## Development without Docker
 
 ```bash
@@ -450,6 +463,7 @@ backend/
   api/routes.py · main.py · config.py · tests/
 frontend/src/   App.tsx · api.ts · ui.tsx · views/{Forecaster,Briefing,Atlas,Branches,TimeTravel,Ingest,NewWorld}.tsx
 scripts/seed_demo_world.py · scripts/import_azgaar.py · scripts/build_srd_catalogue.py
+scripts/llm_smoke.py (each model call once) · scripts/forecast_check.py (a whole forecast on the real model)
 vtt/            the virtual tabletop (backend/ FastAPI + SQLite, frontend/ React DM screen and table)
 ```
 
