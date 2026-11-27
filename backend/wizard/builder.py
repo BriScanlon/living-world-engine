@@ -37,7 +37,11 @@ log = logging.getLogger(__name__)
 TITLES = {"Kingdom": ("King", "Queen"), "Duchy": ("Duke", "Duchess"), "Republic": ("First Consul", "First Consul"),
           "Theocracy": ("High Priest", "High Priestess"), "Empire": ("Emperor", "Empress"),
           "Principality": ("Prince", "Princess")}
-SIZE_RADIUS = {"small": 16.0, "medium": 12.0, "large": 9.5}
+MAX_WILDS = 60  # wilds with monsters per world (keeps a large region inside the ~1,500-document budget)
+# Generated worlds are a campaign region on the globe (issue #38): extent in km, km per cell, town budget
+REGION_SIZES = {"small": {"region_km": (1500, 1000), "cell_km": 18.0, "max_towns": 100},
+                "medium": {"region_km": (2500, 1600), "cell_km": 20.0, "max_towns": 200},
+                "large": {"region_km": (4000, 2500), "cell_km": 24.0, "max_towns": 320}}
 
 
 # =========================================================================== jobs
@@ -168,7 +172,7 @@ def _build_world(answers: dict[str, Any], emit: Callable[..., None] | None, hb_e
         if not src.exists():
             raise ValueError("Uploaded Azgaar file not found; upload it again")
     else:
-        raw = generate(seed, name=name, radius=SIZE_RADIUS.get(a["world"]["size"], 12.0),
+        raw = generate(seed, name=name, **REGION_SIZES.get(a["world"]["size"], REGION_SIZES["medium"]),
                        n_states=int(k["n_states"]), land=a["continents"]["land"], climate=a["world"]["climate"],
                        n_cultures=int(k["n_cultures"]), n_religions=int(k["n_religions"]), hostility=k["hostility"],
                        culture_names=style, religion_names=religions)
@@ -606,10 +610,16 @@ def build_history(ans: dict[str, Any], world: AzgaarWorld, kd: dict[str, dict[st
     per = S.MONSTER_DENSITY.get(ans.get("monster_density") or "normal", 2)
     monsters = wilds = 0
     used: dict[str, int] = {}
-    for ai, prov in prov_by_azgaar.items():
-        if prov.get("lon") is None:
-            continue
-        biome = stats[ai]["biomes"].most_common(1)[0][0] if stats[ai]["biomes"] else 6
+    # At most MAX_WILDS wilds (a large region has ~170 provinces; one wilds each would blow the world's document
+    # budget): one province per biome first, so every biome's creatures appear, then the rest at random
+    def biome_of(ai: int) -> int:
+        return stats[ai]["biomes"].most_common(1)[0][0] if stats[ai]["biomes"] else 6
+    order = sorted((ai for ai, prov in prov_by_azgaar.items() if prov.get("lon") is not None), key=lambda ai: rng.random())
+    firsts = list({biome_of(ai): ai for ai in reversed(order)}.values())
+    chosen = (firsts + [ai for ai in order if ai not in firsts])[:MAX_WILDS]
+    for ai in sorted(chosen):
+        prov = prov_by_azgaar[ai]
+        biome = biome_of(ai)
         picks = srd.monsters_for_biome(biome, rng, k=per, max_cr=hi_cr, min_cr=0, used=used)
         if not picks:
             continue
