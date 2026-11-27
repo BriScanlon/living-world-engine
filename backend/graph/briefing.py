@@ -56,8 +56,23 @@ def build_briefing(store: GraphStore, base: str, compare: str) -> dict[str, Any]
                 return it.get("reasoning")
         return None
 
+    maps_at: dict[str, int] = defaultdict(int)
+    for m in cw.of_type("Map"):
+        if m.get("place"):
+            maps_at[m["place"]] += 1
+
+    def place_of(ev: dict) -> dict[str, Any] | None:
+        """Where an event happened, for "Open in VTT": its location, else a place it targets, else where its target
+        stands (a person's location, a faction's headquarters)."""
+        refs = [ev.get("location"), *ev.get("targets", [])]
+        refs += [(cw.all.get(t) or {}).get("location") or (cw.all.get(t) or {}).get("headquarters")
+                 for t in ev.get("targets", [])]
+        pid = next((r for r in refs if r and (cw.all.get(r) or {}).get("@type") == "Location"), None)
+        return {"id": pid, "name": name(pid), "maps": maps_at.get(pid, 0)} if pid else None
+
     def ev_brief(ev: dict) -> dict[str, Any]:
         return {
+            "place": place_of(ev),
             "id": ev["@id"], "title": ev["name"], "summary": ev.get("summary"), "day": ev.get("in_world_start"),
             "event_type": ev.get("event_type"), "visibility": ev.get("visibility"),
             "actors": [{"id": a, "name": name(a)} for a in ev.get("actors", [])],
@@ -190,6 +205,7 @@ def build_briefing(store: GraphStore, base: str, compare: str) -> dict[str, Any]
         "id": r["@id"], "text": r.get("text"), "dialogue": r.get("dialogue"), "speaker": r.get("speaker"),
         "accuracy": r.get("accuracy"), "day": r.get("in_world_start"),
         "location": {"id": r["location"], "name": name(r["location"])},
+        "place": {"id": r["location"], "name": name(r["location"]), "maps": maps_at.get(r["location"], 0)},
         "about_event": {"id": r["about_event"], "title": name(r["about_event"])} if r.get("about_event") else None,
     } for r in added if r["@type"] == "Rumor"), key=lambda r: (r["day"] or 0, r["location"]["name"]))
 
