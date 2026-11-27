@@ -219,6 +219,10 @@ the contested magic item. See [backend/srd/README.md](backend/srd/README.md).
   4. *Tavern Rumors & Hooks* — filter by location and accuracy; copy dialogue.
   Plus agent intents/activation trace and the raw TerminusDB JSON patch.
 * **Branch controls** — Merge to Canon, Cherry-Pick, Discard & Re-run (fresh seed), Discard.
+* **Unfinished forecasts** — runs are kept on disk, so a forecast survives a backend restart: one cut off by a
+  restart shows as *interrupted* (one stopped by an error, such as a model timeout, as *failed*) and **▶ Resume**
+  continues it after its last finished step, on the same branch. Real models make forecasts take minutes, so this
+  matters once `MOCK_LLM=false`.
 * **Time Travel** — any branch × any in-world day × any commit; force-directed graph,
   click an agent to see exactly what its prompt would contain.
 
@@ -309,6 +313,7 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/health` | TerminusDB status, mock mode, optional extras |
 | POST | `/api/forecasts` | `{session_number, start_day, end_day, forecast_days, session_summary, base_branch}` → `{run_id, branch}` |
 | GET | `/api/forecasts/{id}/events` | SSE stream of LangGraph progress |
+| POST | `/api/forecasts/{id}/resume` | continue an interrupted or failed run from its last checkpoint |
 | GET | `/api/diff?base=main&compare=…` | the 4-part briefing |
 | GET | `/api/diff/raw?base=…&compare=…` | TerminusDB native diff |
 | POST | `/api/branches/{name}/merge` · `/cherry-pick` · `/rerun` | branch controls |
@@ -431,7 +436,8 @@ backend/
   wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
   srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
                 builders.py · briefing.py (4-part diff) · seed.py
-  simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py · runs.py
+  simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py
+                runs.py (run records + checkpoints on disk, resume)
   ingestion/    markdown.py · documents.py · audio.py · extract.py · resolution.py · pipeline.py
   llm/          client.py (OpenAI-compatible, validated JSON) · mock.py (deterministic BDI)
   vtt_link/     client.py (VTT HTTP client) · scene.py (map links, footprints, DM scenes)
