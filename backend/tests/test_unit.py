@@ -110,3 +110,13 @@ def test_forecast_branch_names_never_collide_within_a_second():
     name = names.pop()
     assert re.fullmatch(r"forecast/session-14-20261127t134925-[0-9a-f]{4}", name)  # readable, sorts by time
     assert "/" not in to_branch_id(name)
+
+
+def test_session_numbers_come_from_session_names_only():
+    from api.routes import session_number
+    assert session_number("session-13") == 13 and session_number("forecast/session-14") == 14
+    assert session_number("ingest/session-15-notes") == 15 and session_number("ingest/recap-16") == 16
+    # an imported world's slug ends in its seed; setup steps and dates are not sessions
+    assert session_number("import/azgaar-region-trial-3433") is None
+    assert session_number("setup/kingdoms") is None and session_number("vtt/main") is None
+    assert session_number("ingest/2026-11-27-recap") is None

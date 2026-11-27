@@ -39,7 +39,7 @@ backend/
   llm/      client.py (OpenAI-compatible structured client), mock.py (deterministic stand-ins for every call)
   ingestion/ markdown (Obsidian), documents (pypdf/docling), audio (whisper), extract.py (LLM -> graph), resolution,
             catalogue_link.py (mentions -> SRD/homebrew srd_ref, challenge, species)
-  atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet),
+  atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet or region),
             service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
   wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step),
@@ -202,7 +202,9 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
   loading" crash; reload the page.
 - MapLibre GeoJSON sources fetch in a worker: use absolute URLs (`location.origin + …`).
 - Git Bash rewrites `/app/...` in `docker compose exec backend python /app/...`: prefix `MSYS_NO_PATHCONV=1`.
-- The sample planet is coarse (22 huge provinces), so trips take months; Azgaar worlds are finer.
+- The **demo** sample planet (*Thessaly Reach*, `generate(seed)` planet mode) is coarse (~20 India-sized provinces),
+  so trips there take months. Wizard worlds are **regions** (`generate(..., region_km=, cell_km=, max_towns=)`,
+  `wizard.builder.REGION_SIZES`): ~20k km2 provinces, towns a day or two apart. Native world generation is epic #45.
 - `atlas_state(day=None)` means "max day on the branch", so ended facts drop out.
 
 ## Conventions

@@ -68,6 +68,11 @@ CLIMATES = {
     "tropical": {"latT": 50, "latN": 25, "latS": -25},
     "southern": {"latT": 60, "latN": -10, "latS": -70},
 }
+# Region mode: where a generated campaign region sits, by climate answer (centre latitude, degrees)
+REGION_LATITUDE = {"whole-world": 40.0, "northern": 58.0, "temperate": 45.0, "tropical": 12.0, "southern": -42.0}
+KM_PER_DEG_LAT = 111.2
+PROVINCE_KM2 = 22_000   # target province area in a region (10-40k km2)
+TOWN_SPACING_KM = 45    # minimum distance between towns: about a day or two's walk
 HOSTILITY_POOLS = {
     "peaceful": (["Friendly", "Ally", "Neutral", "Suspicion", "Friendly", "Rival"], ["Neutral", "Friendly", "Unknown"]),
     "uneasy": (["Rival", "Rival", "Enemy", "Suspicion", "Friendly", "Ally"], ["Neutral", "Neutral", "Unknown", "Friendly", "Suspicion"]),
@@ -79,8 +84,23 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
              n_states: int = 9, name: str = "Thessaly Reach", land: str = "continents",
              climate: str = "whole-world", n_cultures: int = 5, n_religions: int = 4,
              hostility: str = "uneasy", culture_names: list[str] | None = None,
-             religion_names: list[tuple[str, str]] | None = None) -> dict[str, Any]:
+             religion_names: list[tuple[str, str]] | None = None,
+             region_km: tuple[float, float] | None = None, cell_km: float = 20.0,
+             max_towns: int = 200) -> dict[str, Any]:
+    """A world in Azgaar Full JSON shape.
+
+    Planet mode (default): the hex grid spans most of an Earth-sized planet (the demo and the tests).
+    Region mode (``region_km=(width, height)``): a campaign region of that size in km, ``cell_km`` per cell, placed at
+    a latitude that fits ``climate``; provinces about ``PROVINCE_KM2``, towns at least ``TOWN_SPACING_KM`` apart (up
+    to ``max_towns``), so journeys take days to weeks instead of months to years."""
     rng = random.Random(seed)
+    region = region_km is not None
+    km_px = 0.0
+    if region:
+        wkm, hkm = region_km
+        height = int(round(width * hkm / wkm))
+        km_px = wkm / width
+        radius = cell_km / (math.sqrt(3) * km_px)
     n_blobs, blob_r, sea_share = LAND_SHAPES.get(land, LAND_SHAPES["continents"])
     culture_list = (culture_names or CULTURE_NAMES)[:max(1, n_cultures)]
     while len(culture_list) < n_cultures:
@@ -148,7 +168,16 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     land = [x >= 20 for x in h]
 
     # ------------------------------------------------------------------ biomes
-    coords = {**CLIMATES.get(climate, CLIMATES["whole-world"]), "lonT": 300, "lonW": -150, "lonE": 150}
+    if region:
+        lat0 = REGION_LATITUDE.get(climate, REGION_LATITUDE["whole-world"])
+        lat_t = hkm / KM_PER_DEG_LAT
+        lon_t = wkm / (KM_PER_DEG_LAT * math.cos(math.radians(lat0)))
+        coords = {"latT": round(lat_t, 4), "latN": round(lat0 + lat_t / 2, 4), "latS": round(lat0 - lat_t / 2, 4),
+                  "lonT": round(lon_t, 4), "lonW": round(-lon_t / 2, 4), "lonE": round(lon_t / 2, 4)}
+    else:
+        coords = {**CLIMATES.get(climate, CLIMATES["whole-world"]), "lonT": 300, "lonW": -150, "lonE": 150}
+    # degrees of latitude per degree of mean annual cooling: a region at 45 degrees is temperate, not taiga
+    lat_cooling = 0.45 if region else 0.6
     moist = [noise(width - x, height - y) for (x, y) in centers]
     biome = []
     for i, (x, y) in enumerate(centers):
@@ -156,7 +185,7 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
             biome.append(0)
             continue
         lat = coords["latN"] - y / height * coords["latT"]
-        t = 30 - abs(lat) * 0.6 - max(0, h[i] - 50) * 0.25
+        t = 30 - abs(lat) * lat_cooling - max(0, h[i] - 50) * 0.25
         m = moist[i]
         if t < -6:
             b = 11
@@ -276,7 +305,11 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     provinces: list[Any] = [0]
     for s in states[1:]:
         cells = [i for i in land_cells if state[i] == s["i"]]
-        k = max(2, min(6, len(cells) // 55))
+        if region:  # provinces by area, not a fixed few per realm
+            cell_km2 = math.sqrt(3) / 2 * cell_km ** 2
+            k = max(1, min(40, round(len(cells) * cell_km2 / PROVINCE_KM2)))
+        else:
+            k = max(2, min(6, len(cells) // 55))
         pcs = farthest([s["center"]] + [c for c in cells if biome[c] != 11], k, [])
         if s["center"] not in pcs:
             pcs[0] = s["center"]
@@ -313,11 +346,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     for p in provinces[1:]:
         p["burg"] = burg_of[p["center"]] or add_burg(p["center"], False)
     extra = [i for i in habitable if not burg_of[i] and state[i]]
+    cap_towns = max_towns if region else 18 + len(provinces)
+    spacing = TOWN_SPACING_KM / km_px if region else 5 * radius
     for c in sorted(extra, key=lambda c: rng.random()):
-        if len(burgs) > 18 + len(provinces):
+        if len(burgs) > cap_towns:
             break
         x, y = centers[c]
-        if all((x - b["x"]) ** 2 + (y - b["y"]) ** 2 > (5 * radius) ** 2 for b in burgs[1:]):
+        if all((x - b["x"]) ** 2 + (y - b["y"]) ** 2 > spacing ** 2 for b in burgs[1:]):
             add_burg(c, False)
 
     # ------------------------------------------------------------------ religions
@@ -326,14 +361,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     religion = [0 if not land[i] else 1 + (culture[i] + state[i]) % len(religion_list) for i in range(n)]
 
     # ------------------------------------------------------------------ routes (roads inside each state)
-    def path(a: int, b2: int) -> list[int]:
+    def tree(a: int) -> dict[int, int]:
+        """Least-cost paths over land from ``a`` to everywhere: cell -> previous cell."""
         prev = {a: -1}
         dist = {a: 0.0}
         pq = [(0.0, a)]
         while pq:
             d, u = heapq.heappop(pq)
-            if u == b2:
-                break
             if d > dist[u]:
                 continue
             for v in nbrs[u]:
@@ -343,6 +377,9 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
                 if nd < dist.get(v, math.inf):
                     dist[v], prev[v] = nd, u
                     heapq.heappush(pq, (nd, v))
+        return prev
+
+    def path(prev: dict[int, int], a: int, b2: int) -> list[int]:
         if b2 not in prev:
             return []
         out = [b2]
@@ -353,22 +390,31 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     routes = []
     for s in states[1:]:
         cap = burgs[s["capital"]]
+        prev = tree(cap["cell"])
         for b in burgs[1:]:
             if b["state"] == s["i"] and b["i"] != cap["i"]:
-                cells = path(cap["cell"], b["cell"])
+                cells = path(prev, cap["cell"], b["cell"])
                 if len(cells) > 1:
                     routes.append({"i": len(routes), "group": "roads",
                                    "points": [[centers[c][0], centers[c][1], c] for c in cells]})
+        if region:  # highways to the capitals of neighbouring realms (overland), so capitals are days, not months, apart
+            for other in s.get("neighbors", []):
+                if other > s["i"]:
+                    cells = path(prev, cap["cell"], burgs[states[other]["capital"]]["cell"])
+                    if len(cells) > 1:
+                        routes.append({"i": len(routes), "group": "highways",
+                                       "points": [[centers[c][0], centers[c][1], c] for c in cells]})
 
     # ------------------------------------------------------------------ rivers
     rivers = []
     springs = sorted((i for i in land_cells if h[i] > 55), key=lambda c: rng.random())
     used: set[int] = set()
+    max_rivers, max_len = (max(14, n // 350), max(60, n // 40)) if region else (14, 60)
     for src in springs:
-        if len(rivers) >= 14 or src in used:
+        if len(rivers) >= max_rivers or src in used:
             continue
         cells = [src]
-        while land[cells[-1]] and len(cells) < 60:
+        while land[cells[-1]] and len(cells) < max_len:
             nxt = min(nbrs[cells[-1]], key=lambda c: h[c])
             if h[nxt] >= h[cells[-1]] and land[nxt] or nxt in cells:
                 break
@@ -383,7 +429,9 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
                   "biome": biome[i], "state": state[i], "province": province[i], "culture": culture[i] if land[i] else 0,
                   "religion": religion[i], "burg": burg_of[i], "pop": pop[i]} for i in range(n)]
     return {
-        "info": {"version": "sample-1", "description": "Living World Engine sample planet in Azgaar Full JSON shape",
+        "info": {"version": "sample-1", "description": "Living World Engine "
+                 + (f"sample region ({region_km[0]:.0f} x {region_km[1]:.0f} km)" if region else "sample planet")
+                 + " in Azgaar Full JSON shape",
                  "mapName": name, "width": width, "height": height, "seed": str(seed)},
         "settings": {"mapName": name, "distanceUnit": "mi"},
         "mapCoordinates": coords,

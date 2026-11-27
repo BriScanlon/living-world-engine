@@ -1,6 +1,8 @@
 """HTTP API for the DM dashboard."""
 from __future__ import annotations
 
+import re
+
 import asyncio
 import json
 import os
@@ -59,12 +61,24 @@ def meta(branch: str = MAIN) -> dict[str, Any]:
     runs = [d for d in w.all.values() if d["@type"] == "ForecastRun"]
     last_session = max([r["session_number"] for r in runs] or [0])
     for s in sessions:
-        digits = "".join(ch for ch in s.split("/")[-1] if ch.isdigit())
-        if digits:
-            last_session = max(last_session, int(digits))
+        n = session_number(s)
+        if n is not None:
+            last_session = max(last_session, n)
     return {"branch": branch, "current_day": w.max_day(), "last_session": last_session,
             "sessions": sessions, "demo_summary": DEMO_SESSION_SUMMARY,
             "counts": WorldView(w.all.values()).snapshot()["counts"]}
+
+
+def session_number(source_session: str) -> int | None:
+    """The session a source_session names ("session-14", "forecast/session-14", "ingest/session-15-notes",
+    "ingest/recap-15"), or None.
+    Other sources carry digits that are not sessions: an imported world's "import/azgaar-region-trial-3433" (its
+    seed), "setup/kingdoms"... Counting those made a new wizard world's next session 3434."""
+    m = re.search(r"session[-_ ]?(\d+)", source_session, re.I)
+    if not m and source_session.startswith("ingest/"):  # ingested notes named e.g. "recap-15.md": a short number
+        name = re.sub(r"\d{4}-\d{2}-\d{2}", " ", source_session.split("/", 1)[1])  # a dated file is not session 2026
+        m = re.search(r"(?<!\d)(\d{1,3})(?!\d)", name)
+    return int(m.group(1)) if m else None
 
 
 @router.post("/admin/seed")

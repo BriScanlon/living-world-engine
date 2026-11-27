@@ -212,7 +212,7 @@ AD&D *World Builder's Guidebook* (the order only; wording, options and tables ar
 | Step | You choose | The engine creates (one `[setup]` commit each) |
 | --- | --- | --- |
 | Approach & focus | Planet-in, Kingdom-first, Local-out or Literary; a campaign focus (seafaring, court intrigue, frontier, dying world, holy war…) that pre-fills every step | — |
-| 1 World | name, seed, climate band, detail, or *use my Azgaar export* | the planet and its atlas layers (PMTiles in Docker) |
+| 1 World | name, seed, climate band, detail (small / medium / large region), or *use my Azgaar export* | a **campaign region** on the globe (about 1,500, 2,500 or 4,000 km across, placed at a latitude that fits the climate) and its atlas layers (PMTiles in Docker) |
 | 2 Continents | shape of the land | named continents and islands |
 | 3 Kingdoms | realms, how hostile, cultures and naming style, peoples (SRD species), religions | realms, provinces, towns, diplomacy, border claims and war goals; a ruler per realm; churches, cults and their gods |
 | 4 Local area | starting town, tavern, the local power struggle, notable NPCs, party name, rarity of a contested magic item | two rival local factions, NPCs with conflicting WANTS / NEEDS / FEARS, debts and secrets, goal clocks, an SRD magic item both sides want, the party, opening rumors |
@@ -227,6 +227,11 @@ only (never desires, relationships or goals) and told to keep every name, invent
 is commonly known, because agents read the descriptions of what they know. Anything unusable, and any batch that
 fails, keeps its template: a world always builds. On qwen3.8:27b (7900 XT) a small world's 57 descriptions take
 about a minute and a half. Mock mode leaves the templates alone.
+
+**Scale.** A generated world is a region, not a planet: provinces of about 20,000 km² (10–40k), towns 45–65 km
+apart (a day or two on foot), highways between neighbouring capitals (one to three weeks), up to 100 / 200 / 320
+towns and 60 wilds, so even a large region stays within about 1,500 graph documents. The rest of the globe is sea
+beyond the maps. (The first-run demo planet, *Thessaly Reach*, is still the old whole-planet sample.)
 
 Every 🎲 rolls a field; *Surprise me* rolls a whole step. The approach changes the order you answer in; the world is
 always built planet-first because a town needs a planet to sit on.
