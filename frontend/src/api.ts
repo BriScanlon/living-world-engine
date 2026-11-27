@@ -229,6 +229,32 @@ export interface RunSummary {
   owner: string | null;
 }
 
+/** A homebrew catalogue entry (shaped like an SRD entry, id home:<uid>). */
+export type HomebrewKind = "monster" | "species" | "item";
+export interface HomebrewEntry {
+  id?: string;
+  uid?: string;
+  kind: HomebrewKind;
+  name: string;
+  description?: string | null;
+  tags?: string[];
+  overrides?: string | null;
+  derived_from?: string | null;
+  in_world?: boolean;
+  updated_at?: string | null;
+  [field: string]: unknown;
+}
+export interface HomebrewState {
+  entries: HomebrewEntry[];
+  in_world_only: HomebrewEntry[];
+  kinds: HomebrewKind[];
+  fields: Record<HomebrewKind, string[]>;
+  sizes: string[];
+  rarities: string[];
+  biomes: Record<string, string>;
+  campaign: string;
+}
+
 export interface AtlasState {
   atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean } | null;
   branch: string;
@@ -424,6 +450,17 @@ export const api = {
   paintTokens: (placeId: string, body: { branch: string; day: number | null }) =>
     req<{ queued: { name: string; job: string }[]; already: string[] }>(`/places/${placeId}/tokens`, json(body)),
   tableLog: () => req<TableLog>("/vtt/session-log"),
+  homebrew: () => req<HomebrewState>("/homebrew"),
+  saveHomebrew: (entry: HomebrewEntry, replace_uid?: string) =>
+    req<HomebrewEntry>("/homebrew", json({ entry, replace_uid })),
+  deleteHomebrew: (uid: string) => req<{ removed: string }>(`/homebrew/${enc(uid)}`, { method: "DELETE" }),
+  homebrewFromSrd: (srdId: string) => req<HomebrewEntry>(`/homebrew/from-srd/${srdId}`),
+  importHomebrew: (items: unknown[]) =>
+    req<{ imported: number; rejected: { index: number; name: string | null; error: string }[] }>("/homebrew/import", json(items)),
+  copyHomebrewToWorld: () => req<{ copied: number; campaign: string }>("/homebrew/copy-to-world", { method: "POST" }),
+  searchSrd: (q: string, kind?: string) =>
+    req<{ id: string; name: string; kind: HomebrewKind; detail: string }[]>(
+      `/srd/search?q=${enc(q)}${kind ? `&kind=${kind}` : ""}`),
   localBrief: (lon: number, lat: number, branch: string, day: number | null) =>
     req<LocalBrief>(`/atlas/local-brief?lon=${lon}&lat=${lat}&branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}`),
   paintLocal: (body: { lon: number; lat: number; branch: string; day: number | null; name?: string; description?: string }) =>

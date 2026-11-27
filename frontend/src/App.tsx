@@ -4,6 +4,7 @@ import { Badge, cx } from "./ui";
 import Branches from "./views/Branches";
 import Briefing from "./views/Briefing";
 import Forecaster from "./views/Forecaster";
+import Homebrew from "./views/Homebrew";
 import Ingest from "./views/Ingest";
 import NewWorld from "./views/NewWorld";
 import TimeTravel from "./views/TimeTravel";
@@ -11,7 +12,7 @@ import TimeTravel from "./views/TimeTravel";
 // MapLibre is large: load the atlas only when its tab opens
 const Atlas = lazy(() => import("./views/Atlas"));
 
-type View = "forecast" | "briefing" | "atlas" | "branches" | "time" | "ingest" | "new";
+type View = "forecast" | "briefing" | "atlas" | "branches" | "time" | "ingest" | "homebrew" | "new";
 const NAV: { id: View; label: string }[] = [
   { id: "forecast", label: "Session Forecaster" },
   { id: "briefing", label: "DM Briefing" },
@@ -19,6 +20,7 @@ const NAV: { id: View; label: string }[] = [
   { id: "branches", label: "Branches" },
   { id: "time", label: "Time Travel" },
   { id: "ingest", label: "Ingest" },
+  { id: "homebrew", label: "Homebrew" },
   { id: "new", label: "✦ New World" },
 ];
 
@@ -131,6 +133,7 @@ export default function App() {
         {view === "branches" && <Branches branches={branches} onChanged={refresh} onOpenBriefing={openBriefing} />}
         {view === "time" && <TimeTravel branches={branches} />}
         {view === "ingest" && <Ingest branches={branches} health={health} onChanged={refresh} />}
+        {view === "homebrew" && <Homebrew />}
         {view === "new" && <NewWorld onSwitched={() => { refreshAll(); go("atlas"); }} />}
       </main>
     </div>

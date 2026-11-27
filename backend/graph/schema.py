@@ -30,7 +30,7 @@ from typing import Any
 NODE_TYPES = ["Character", "Faction", "Location", "Province", "Item", "Monster", "Event", "Rumor", "Goal"]
 AGENT_TYPES = ["Character", "Faction"]
 EDGE_TYPES = ["DesireEdge", "ControlEdge", "RelationshipEdge", "EpistemicEdge"]
-META_TYPES = ["ForecastRun", "Alias", "WorldAtlas", "Map"]
+META_TYPES = ["ForecastRun", "Alias", "WorldAtlas", "Map", "CatalogueEntry"]
 
 DESIRE_KINDS = ["WANTS", "NEEDS", "FEARS"]
 CONTROL_KINDS = ["CONTROLS", "OWNS"]
@@ -280,6 +280,21 @@ SCHEMA: list[dict[str, Any]] = [
         "anchor_lat": _opt("xsd:double"),
         "thumb_path": _opt("xsd:string"),
         "media_type": _opt("xsd:string"),
+    },
+    {
+        "@type": "Class",
+        "@id": "CatalogueEntry",
+        "@key": _LEX_UID,
+        "@documentation": {"@comment": "A homebrew creature, people or item, shaped like an SRD entry (id home:<uid>). "
+                                       "Lives in the homebrew library and is copied into each world the wizard builds."},
+        "uid": "xsd:string",
+        "name": "xsd:string",
+        "kind": "xsd:string",  # monster | species | item
+        "data": "xsd:string",  # JSON: the SRD-shaped fields (ac, hp, cr, size, type, traits, biomes, rarity...)
+        "tags": _set("xsd:string"),
+        "overrides": _opt("xsd:string"),  # an SRD id this entry replaces, e.g. srd:goblin
+        "derived_from": _opt("xsd:string"),  # the SRD entry it was started from (keeps SRD attribution)
+        "updated_at": _opt("xsd:string"),
     },
     {
         "@type": "Class",

@@ -125,6 +125,13 @@ def footprints(w: WorldView) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- scene
 def build_scene(store: GraphStore, place_id: str, branch: str = "main", day: int | None = None,
                 map_title: str | None = None, vtt_map_id: str | None = None) -> dict[str, Any]:
+    from srd import homebrew
+    with srd.homebrew(homebrew.overlay_entries(store)):  # homebrew creatures' stat lines too
+        return _build_scene(store, place_id, branch, day, map_title, vtt_map_id)
+
+
+def _build_scene(store: GraphStore, place_id: str, branch: str, day: int | None,
+                 map_title: str | None, vtt_map_id: str | None) -> dict[str, Any]:
     w = _world(store, branch, day)
     place = w.get(place_id)
     if not place:

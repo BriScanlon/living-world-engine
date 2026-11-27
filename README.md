@@ -212,6 +212,20 @@ and animal stat blocks, 259 magic items, 9 species, 12 classes, 4 backgrounds an
 NPC species, classes and stat-block templates (`srd_ref`), each biome's bestiary within a challenge-rating window, and
 the contested magic item. See [backend/srd/README.md](backend/srd/README.md).
 
+**Homebrew** (`backend/srd/homebrew.py`, the **Homebrew** tab): your own creatures, peoples and treasures, shaped like
+SRD entries (ids `home:<name>`). Make one from blank or start from an SRD entry (search, pick, rename, change);
+export and import the library as JSON to share it. Entries live in a homebrew library database (`HOMEBREW_DB`) and are
+layered over the SRD: every lookup sees them first, and one can **replace** an SRD entry outright. The wizard builds
+with them and gives each new world its own copy:
+
+* a creature appears in the wilds of the biomes it lists (any biome if none), ahead of SRD fauna;
+* every homebrew people joins at least one culture, and lives in the starting town (unless the world is human-led);
+* a treasure can become the contested item (homebrew first, at the chosen rarity).
+
+Worlds keep the homebrew they were built with; *Copy the library into this world* refreshes the current campaign's
+copies. Scenes sent to the VTT show homebrew stat lines, and zoom-in map briefs name homebrew fauna. Entries started
+from an SRD entry record it (`derived_from`) and keep its CC-BY attribution; your own entries need none.
+
 ### 7. DM dashboard (`frontend/`)
 
 * **Session Forecaster** — session #, start/end day, days until next session, summary (paste,
@@ -338,7 +352,9 @@ Interactive docs at `/docs`. Highlights:
 | POST | `/api/atlas/import` | import an Azgaar Full JSON export |
 | GET · POST | `/api/wizard/spec` · `/api/wizard/build` · `/api/wizard/jobs/{id}` · `/api/wizard/upload` | new-world wizard |
 | GET · POST · DELETE | `/api/campaigns` · `/api/campaigns/active` · `/api/campaigns/{id}` | campaigns (one database per world) |
-| GET | `/api/srd` · `/api/srd/entry/{id}` | SRD catalogue info and entries |
+| GET | `/api/srd` · `/api/srd/entry/{id}` · `/api/srd/search?q=&kind=` | SRD catalogue info, entries (also `home:` ids), search |
+| GET · POST · DELETE | `/api/homebrew` · `/api/homebrew/{uid}` | the homebrew library: list (with this world's copies), save `{entry, replace_uid?}`, remove |
+| GET · POST | `/api/homebrew/from-srd/{srd_id}` · `/export` · `/import` · `/copy-to-world` | start from an SRD entry · JSON export/import · copy into the current campaign |
 | GET | `/api/vtt/status` · `/api/vtt/maps` · `/api/vtt/media/{path}` | tabletop link status, its maps, proxied thumbnails |
 | GET · POST | `/api/places/{id}/maps` | maps linked to a place · link one `{vtt_map_id, day, branch, kind, rotation_deg}` |
 | DELETE | `/api/maps/{id}` | unlink (ends the map on that day) |
@@ -465,7 +481,8 @@ backend/
                 party.py (party view: what the party knows, DM marks) · party_map.py (the party's overland map)
                 travel.py (routes, roads, sea legs, travel days) · local.py (zoom-in maps of any spot)
   wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
-  srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates)
+  srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates, homebrew layer)
+                homebrew.py (the DM's own entries: library, validation, import/export, copies into worlds)
                 builders.py · briefing.py (4-part diff) · seed.py
   simulation/   engine.py (LangGraph) · models.py (AgentIntent, WorldEvent…) · mutations.py · prompts.py
                 runs.py (run records + checkpoints on disk, resume)

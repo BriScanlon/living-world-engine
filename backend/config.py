@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     atlas_dir: str = "./data/atlas"
     # Forecast run records and checkpoints (default: runs/ next to the atlas folder, in the data volume)
     runs_dir: str = ""
+    # TerminusDB database holding the homebrew library (custom creatures, peoples, items shared by every world)
+    homebrew_db: str = "homebrew_library"
     # On first start, generate the sample planet, import it and place the Greywater demo on it
     atlas_sample_on_startup: bool = True
     tippecanoe_bin: str = "tippecanoe"
