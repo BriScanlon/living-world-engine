@@ -117,7 +117,7 @@ def test_exit_test_a_homebrew_creature_and_people_turn_up_in_a_new_world(library
         monsters = [d for d in docs if d["@type"] == "Monster"]
         people = [d for d in docs if d["@type"] == "Character" and d.get("kind") == "npc"]
         assert any(m.get("srd_ref") == "home:marsh-wight" for m in monsters), [m["name"] for m in monsters]
-        assert any(c.get("species") == "Mirefolk" for c in people), sorted({c.get("species") for c in people})
+        assert any(c.get("species") == "Mirefolk" for c in people), sorted({str(c.get("species")) for c in people})
         # the world keeps its own copy of the homebrew it was made with
         assert {e["uid"] for e in hb.entries(world)} == {"marsh-wight", "mirefolk"} and res["homebrew"] == 2
         with catalogue.homebrew(hb.overlay_entries(world)):

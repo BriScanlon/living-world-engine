@@ -432,6 +432,16 @@ def build_local(ans: dict[str, Any], kd: dict[str, dict[str, Any]], rng: random.
                      aliases=[person.split()[0]])
         docs.append(d)
         npc[key] = d
+    # Each homebrew people placed in this world really lives here: if the random picks missed one, it takes over a
+    # notable whose people the town has more of (the leaders keep theirs)
+    for sp in [s for s in srd.homebrew_names("species") if s in species]:
+        if any(d["species"] == sp for d in npc.values()):
+            continue
+        counts = Counter(d["species"] for d in npc.values())
+        spare = [d for k, d in npc.items() if k not in ("a_lead", "b_lead") and counts[d["species"]] > 1] or \
+                [d for k, d in npc.items() if k not in ("a_lead", "b_lead")]
+        if spare:
+            rng.choice(spare)["species"] = sp
     A, B, P = npc["a_lead"]["@id"], npc["b_lead"]["@id"], party["@id"]
     FA, FB, I = fa["@id"], fb["@id"], item["@id"]
 
