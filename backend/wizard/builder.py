@@ -115,6 +115,20 @@ def upload_dir() -> Path:
 
 # =========================================================================== the build
 def build_world(answers: dict[str, Any], emit: Callable[..., None] | None = None) -> dict[str, Any]:
+    """Build a new campaign world. The DM's homebrew library is layered over the SRD for the whole build (creatures in
+    the wilds, peoples among the cultures and NPCs, treasures) and copied into the new world."""
+    from srd import homebrew
+    try:
+        hb_entries = homebrew.entries(homebrew.library())
+    except Exception:  # noqa: BLE001 - no library (or it can't be reached): build from the SRD alone
+        log.warning("Homebrew library unavailable; building from the SRD only", exc_info=True)
+        hb_entries = []
+    with srd.homebrew(hb_entries):
+        return _build_world(answers, emit, hb_entries)
+
+
+def _build_world(answers: dict[str, Any], emit: Callable[..., None] | None, hb_entries: list[dict[str, Any]]
+                 ) -> dict[str, Any]:
     emit = emit or (lambda *a, **k: None)
     a = merge_answers(answers)
     seed = int(a["world"].get("seed") or random.randrange(1, 10**9))
@@ -127,6 +141,9 @@ def build_world(answers: dict[str, Any], emit: Callable[..., None] | None = None
     root_store.create_campaign(db, name)
     store = GraphStore(root_store.s, db)
     summary: dict[str, Any] = {"campaign": db, "name": name, "seed": seed, "atlas": slug, "steps": {}}
+    if hb_entries:
+        from srd import homebrew
+        summary["homebrew"] = homebrew.copy_into(store, hb_entries)
 
     def commit(step_no: int, step: str, docs: list[dict[str, Any]], message: str) -> None:
         store.upsert(docs, "main", f"[setup] {step_no}/5 {message}")
@@ -203,6 +220,14 @@ def build_world(answers: dict[str, Any], emit: Callable[..., None] | None = None
             culture_species[cul["i"]] = rng.sample(species_all, 2)
         else:
             culture_species[cul["i"]] = [rng.choice(species_all)]
+    # The DM's own peoples always find a home: each homebrew species joins at least one culture
+    # (a human-led world stays human-led).
+    hb_species = srd.homebrew_names("species")
+    if hb_species and k["species_mix"] != "human-led" and culture_species:
+        cultures = sorted(culture_species)
+        for n, sp in enumerate(hb_species):
+            if not any(sp in v for v in culture_species.values()):
+                culture_species[cultures[n % len(cultures)]].append(sp)
     states = world.live(pack.get("states", []))
     sid = {s["i"]: f"Faction/{world.state_uid(s['i'])}" for s in states}
     burg_loc = {bg["i"]: f"Location/{world.uid('b', bg['i'], bg.get('name', ''))}" for bg in world.live(pack.get("burgs", []))}
@@ -301,6 +326,9 @@ def build_local(ans: dict[str, Any], kd: dict[str, dict[str, Any]], rng: random.
     realm_doc = kd.get(realm, {})
     culture = 1 + (sum(map(ord, host["uid"])) % 5)
     species = culture_species.get(culture) or [rng.choice(srd.species_names())]
+    # homebrew peoples living anywhere in this world also live in the starting town
+    placed = {sp for v in culture_species.values() for sp in v}
+    species = species + [sp for sp in srd.homebrew_names("species") if sp in placed and sp not in species]
     docs: list[dict[str, Any]] = []
     if ans.get("town_name"):
         host["aliases"] = sorted(set(host.get("aliases", [])) | {host["name"]})

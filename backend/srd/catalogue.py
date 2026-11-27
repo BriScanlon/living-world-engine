@@ -3,12 +3,19 @@
 Built once from the PDF by ``scripts/build_srd_catalogue.py`` into ``srd_5_2_1.json``.
 World documents point at entries with ``srd_ref`` (e.g. ``srd:ghoul``) instead of copying stats.
 
+**Homebrew** (``srd.homebrew``) layers the DM's own creatures, peoples and items over the SRD: inside
+``with catalogue.homebrew(entries):`` every lookup here (``by_id``, ``monster``, ``monsters_for_biome``,
+``species_names``, ``magic_items``...) sees those entries first (ids ``home:<uid>``), and an entry with
+``overrides: "srd:..."`` (or the same name) replaces that SRD entry. Outside the block it is the plain SRD.
+
 The biome / culture mappings below are the engine's own choices, not SRD content.
 """
 from __future__ import annotations
 
 import json
 import random
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -57,13 +64,51 @@ def load() -> dict[str, Any]:
     return json.loads(PATH.read_text(encoding="utf-8"))
 
 
+# ------------------------------------------------------------------------------------------------ homebrew layer
+KIND_KEYS = {"monster": "monsters", "species": "species", "item": "magic_items"}
+_homebrew: ContextVar[dict[str, Any] | None] = ContextVar("homebrew", default=None)
+
+
+@contextmanager
+def homebrew(entries: list[dict[str, Any]] | None):
+    """Layer homebrew entries (``srd.homebrew.as_catalogue_entries`` shape) over the SRD for the block."""
+    token = _homebrew.set({"entries": list(entries or []), "merged": None})
+    try:
+        yield
+    finally:
+        _homebrew.reset(token)
+
+
+def data() -> dict[str, Any]:
+    """The catalogue as lookups see it: the SRD, with the active homebrew first and replacing what it overrides."""
+    base = load()
+    layer = _homebrew.get()
+    if not layer or not layer["entries"]:
+        return base
+    if layer["merged"] is None:
+        merged = dict(base)
+        for kind, key in KIND_KEYS.items():
+            mine = [e for e in layer["entries"] if e.get("kind") == kind]
+            gone = {e.get("overrides") for e in mine} | {e["name"].lower() for e in mine}
+            merged[key] = mine + [e for e in base.get(key, []) if e["id"] not in gone and e["name"].lower() not in gone]
+        layer["merged"] = merged
+    return layer["merged"]
+
+
+def homebrew_names(kind: str) -> list[str]:
+    """Names of the active homebrew entries of one kind (monster | species | item)."""
+    layer = _homebrew.get()
+    return [e["name"] for e in (layer or {}).get("entries", []) if e.get("kind") == kind]
+
+
 def attribution() -> str:
     return load().get("attribution", "")
 
 
 def by_id(entry_id: str) -> dict[str, Any] | None:
+    cat = data()
     for key in ("monsters", "magic_items", "species", "classes", "backgrounds"):
-        for e in load()[key]:
+        for e in cat.get(key, []):
             if e["id"] == entry_id:
                 return e
     return None
@@ -71,23 +116,27 @@ def by_id(entry_id: str) -> dict[str, Any] | None:
 
 def monster(name: str) -> dict[str, Any] | None:
     n = name.lower()
-    return next((m for m in load()["monsters"] if m["name"].lower() == n), None)
+    return next((m for m in data()["monsters"] if m["name"].lower() == n), None)
 
 
 def monsters_for_biome(biome: int, rng: random.Random, *, k: int = 2, max_cr: float = 30.0,
                        min_cr: float = 0.0, used: dict[str, int] | None = None) -> list[dict[str, Any]]:
-    """Pick plausible SRD monsters for an Azgaar biome, matching names loosely ("Green Dragon" ->
-    any green dragon age band) within a challenge-rating window."""
+    """Pick plausible monsters for an Azgaar biome, matching SRD names loosely ("Green Dragon" -> any green dragon
+    age band) within a challenge-rating window. Homebrew monsters join the pool for the biomes they list (or any
+    biome if they list none) and are picked before SRD ones of the same rarity of use."""
     wanted = BIOME_FAUNA.get(biome, {}).get("names", []) + COMMON_THREATS[:3]
     pool = []
-    for m in load()["monsters"]:
+    for m in data()["monsters"]:
         if m.get("cr_value") is None or not (min_cr <= m["cr_value"] <= max_cr):
             continue
-        if any(w.lower() in m["name"].lower() for w in wanted):
+        if m.get("homebrew"):
+            if not m.get("biomes") or biome in m["biomes"]:
+                pool.append(m)
+        elif any(w.lower() in m["name"].lower() for w in wanted):
             pool.append(m)
     rng.shuffle(pool)
-    if used is not None:  # spread the bestiary around: least-used kinds first
-        pool.sort(key=lambda m: used.get(m["name"].split()[-1], 0))
+    # spread the bestiary around (least-used kinds first); among equals, the DM's own creatures first
+    pool.sort(key=lambda m: ((used or {}).get(m["name"].split()[-1], 0), not m.get("homebrew")))
     seen, out = set(), []
     for m in pool:
         key = m["name"].split()[-1]
@@ -103,13 +152,14 @@ def monsters_for_biome(biome: int, rng: random.Random, *, k: int = 2, max_cr: fl
 
 def magic_items(rng: random.Random, *, rarities: tuple[str, ...] = ("Rare", "Very Rare", "Legendary"),
                 k: int = 3) -> list[dict[str, Any]]:
-    pool = [i for i in load()["magic_items"] if i["rarity"] in rarities and "," not in i["name"]]
+    pool = [i for i in data()["magic_items"] if i.get("rarity") in rarities and "," not in i["name"]]
     rng.shuffle(pool)
+    pool.sort(key=lambda i: not i.get("homebrew"))  # the DM's own treasures first
     return pool[:k]
 
 
 def species_names() -> list[str]:
-    return [s["name"] for s in load()["species"]] or ["Human", "Elf", "Dwarf", "Halfling"]
+    return [s["name"] for s in data()["species"]] or ["Human", "Elf", "Dwarf", "Halfling"]
 
 
 def class_for_role(role: str, rng: random.Random) -> str | None:

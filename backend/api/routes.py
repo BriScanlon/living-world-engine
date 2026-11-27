@@ -634,11 +634,92 @@ def srd_info() -> dict[str, Any]:
 
 @router.get("/srd/entry/{entry_id:path}")
 def srd_entry(entry_id: str) -> dict[str, Any]:
-    from srd import catalogue
-    e = catalogue.by_id(entry_id)
+    """An SRD entry, or a homebrew one (``home:...``) from this campaign or the library."""
+    from srd import catalogue, homebrew
+    with catalogue.homebrew(homebrew.overlay_entries(_store())):
+        e = catalogue.by_id(entry_id)
     if not e:
-        raise HTTPException(404, "Not in the SRD catalogue")
+        raise HTTPException(404, "Not in the SRD catalogue or the homebrew")
     return e
+
+
+@router.get("/srd/search")
+def srd_search(q: str = "", kind: str | None = None) -> list[dict[str, Any]]:
+    from srd import homebrew
+    return homebrew.search_srd(q, kind)
+
+
+# =========================================================================== homebrew (the DM's own catalogue)
+def _homebrew_call(fn, *args, **kw):
+    from srd import homebrew
+    try:
+        return fn(*args, **kw)
+    except homebrew.HomebrewError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.get("/homebrew")
+def homebrew_list() -> dict[str, Any]:
+    """The homebrew library, plus this campaign's own copies (what its world was built with)."""
+    from srd import homebrew
+    lib = homebrew.entries(homebrew.library())
+    world = homebrew.entries(_store())
+    own, in_lib = {e["uid"] for e in world}, {e["uid"] for e in lib}
+    return {"entries": [{**e, "in_world": e["uid"] in own} for e in lib],
+            "in_world_only": [e for e in world if e["uid"] not in in_lib],
+            "kinds": list(homebrew.KINDS), "fields": homebrew.FIELDS, "sizes": list(homebrew.SIZES),
+            "rarities": list(homebrew.RARITIES), "biomes": homebrew.BIOMES, "campaign": _store().db}
+
+
+class HomebrewBody(BaseModel):
+    entry: dict[str, Any]
+    replace_uid: str | None = None  # the uid it had before a rename
+
+
+@router.post("/homebrew")
+def homebrew_save(body: HomebrewBody) -> dict[str, Any]:
+    from srd import homebrew
+    return _homebrew_call(homebrew.save, homebrew.library(), body.entry, replace_uid=body.replace_uid)
+
+
+@router.delete("/homebrew/{uid:path}")
+def homebrew_delete(uid: str) -> dict[str, Any]:
+    from srd import homebrew
+    try:
+        homebrew.remove(homebrew.library(), uid)
+    except Exception as e:  # noqa: BLE001
+        raise _err(e) from e
+    return {"removed": uid}
+
+
+@router.get("/homebrew/from-srd/{srd_id:path}")
+def homebrew_from_srd(srd_id: str) -> dict[str, Any]:
+    """A new entry pre-filled from an SRD entry, to rename and modify."""
+    from srd import homebrew
+    return _homebrew_call(homebrew.from_srd, srd_id)
+
+
+@router.get("/homebrew/export")
+def homebrew_export():
+    from fastapi.responses import JSONResponse
+
+    from srd import homebrew
+    return JSONResponse(homebrew.export(homebrew.library()),
+                        headers={"Content-Disposition": 'attachment; filename="homebrew.json"'})
+
+
+@router.post("/homebrew/import")
+def homebrew_import(items: list[dict[str, Any]]) -> dict[str, Any]:
+    from srd import homebrew
+    return homebrew.import_entries(homebrew.library(), items)
+
+
+@router.post("/homebrew/copy-to-world")
+def homebrew_copy_to_world() -> dict[str, Any]:
+    """Give the current campaign up-to-date copies of the library (worlds keep what they were built with)."""
+    from srd import homebrew
+    items = homebrew.entries(homebrew.library())
+    return {"copied": _homebrew_call(homebrew.copy_into, _store(), items), "campaign": _store().db}
 
 
 # =========================================================================== forecasts

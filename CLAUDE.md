@@ -41,7 +41,8 @@ backend/
             service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
   wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step)
-  srd/      srd_5_2_1.json (generated, CC-BY-4.0) + catalogue.py (lookups, biome bestiary, NPC templates)
+  srd/      srd_5_2_1.json (generated, CC-BY-4.0) + catalogue.py (lookups, biome bestiary, NPC templates,
+            homebrew layer) + homebrew.py (DM's own creatures/peoples/items: library, import/export, world copies)
   vtt_link/ client.py (HTTP to the VTT), scene.py (Map links, footprints, DM scenes), session.py (map briefs,
             paint jobs, portrait tokens, session log -> forecast)
   tests/    pytest; integration tests need a reachable TerminusDB (skip otherwise)
@@ -82,6 +83,12 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world)
 - **Engine -> VTT is push-only.** The VTT never calls the engine. Scenes (`POST /api/scene`) and the session log
   are **DM-socket only**; hidden tokens never reach `role=table` sockets (per-role `tokens` message). Token pictures
   are looked up from the VTT asset library, never trusted from clients.
+- **Homebrew** entries are `CatalogueEntry` docs (meta type; `home:<uid>`, SRD-shaped JSON in `data`). The library
+  is its own database (`HOMEBREW_DB`, not listed as a campaign); the wizard copies it into each new world, and
+  `homebrew.overlay_entries(store)` = the campaign's copies, then the library. Code that resolves `srd_ref` or picks
+  from the catalogue must run inside `with catalogue.homebrew(entries):` (a ContextVar; set it inside worker
+  threads): `data()` then puts homebrew first and drops SRD entries it `overrides`. `srd_ref` holds `home:` ids too
+  (the design doc's rename to `catalogue_ref` was not done).
 - **Overland party map** (`atlas/party_map.py`) is rendered server-side with Pillow/shapely, uploaded to the VTT
   tagged `lwe-overland:<db>` (shown "contain", no battle grid), replaces older ones, and redraws itself after a
   party-knowledge mark while it is on the table.
@@ -203,5 +210,5 @@ types, empty or odd outcomes).
 
 Backlog: real map labels on the globe (needs bundled fonts/glyphs), battle strength from SRD challenge ratings,
 "Open in VTT" from the briefing, LLM-written
-wizard prose; epics: homebrew catalogue (custom creatures/species/items beside the SRD), native world generation
-instead of Azgaar.
+wizard prose, homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
+Done since: the homebrew catalogue epic (library, overlay, wizard, editor).

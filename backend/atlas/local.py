@@ -157,9 +157,11 @@ def _atlas_dir(w: WorldView) -> Path:
 
 
 def brief(store: GraphStore, lon: float, lat: float, branch: str = "main", day: int | None = None) -> dict[str, Any]:
+    from srd import homebrew
     docs = store.all_documents(branch)
     w = WorldView(docs, day if day is not None else WorldView(docs).max_day())
-    seen = look(w, _atlas_dir(w), lon, lat)
+    with srd.homebrew(homebrew.overlay_entries(store)):  # the DM's own fauna for the biome too
+        seen = look(w, _atlas_dir(w), lon, lat)
     name, text = describe(seen)
     existing = _existing_spot(w, lon, lat)
     return {"name": existing["name"] if existing else name, "description": text, "day": w.day, "look": seen,
