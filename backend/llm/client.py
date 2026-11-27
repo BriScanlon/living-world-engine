@@ -43,6 +43,33 @@ def _extract_json(text: str) -> str:
     return text
 
 
+def schema_outline(schema: dict) -> str:
+    """A compact outline of a JSON Schema for the prompt (``{events: [{title, summary, event_type: a|b, ...}]}``):
+    enough for the model to know the fields when the server already enforces the full schema (json_schema mode)."""
+    defs = schema.get("$defs", {})
+
+    def walk(node: dict, depth: int) -> str:
+        if "$ref" in node:
+            node = defs.get(node["$ref"].split("/")[-1], {})
+        if "anyOf" in node:
+            parts = [walk(x, depth) for x in node["anyOf"] if x.get("type") != "null"]
+            return "|".join(parts) or "null"
+        if "enum" in node:
+            return "|".join(str(v) for v in node["enum"])
+        kind = node.get("type")
+        if kind == "object" and node.get("properties") and depth < 4:
+            req = set(node.get("required", []))
+            return "{" + ", ".join(f"{k}{'' if k in req else '?'}: {walk(v, depth + 1)}"
+                                   for k, v in node["properties"].items()) + "}"
+        if kind == "object":
+            return "{id: " + walk(node.get("additionalProperties") or {}, depth + 1) + "}"
+        if kind == "array":
+            return "[" + walk(node.get("items") or {}, depth) + "]"
+        return kind or "any"
+
+    return walk(schema, 0)
+
+
 def _retryable(err: Exception) -> bool:
     """Transport trouble or a server error is worth another attempt; a 4xx (bad request, auth, unknown model) isn't."""
     import openai
@@ -75,12 +102,21 @@ class LLMClient:
 
     def structured(self, system: str, user: str, schema: type[T], *, temperature: float | None = None) -> T:
         json_schema = schema.model_json_schema()
-        sys_prompt = (
-            f"{system}\n\nRespond with a single JSON object only — no prose, no markdown — "
-            f"that validates against this JSON Schema:\n{json.dumps(json_schema)}"
-        )
+        if self.s.llm_json_mode == "json_schema":
+            # The server constrains decoding to the schema; an outline of the fields is all the prompt needs
+            # (the full schema would cost ~1.3K tokens on the arbiter alone).
+            sys_prompt = (f"{system}\n\nRespond with a single JSON object only (the server enforces its schema), "
+                          f"shaped: {schema_outline(json_schema)}")
+        else:
+            sys_prompt = (f"{system}\n\nRespond with a single JSON object only — no prose, no markdown — "
+                          f"that validates against this JSON Schema:\n{json.dumps(json_schema)}")
         messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}]
         kwargs = self._request_options(schema, json_schema)
+        if self.s.llm_context_tokens:
+            est = (len(sys_prompt) + len(user)) // 3  # rough: JSON-heavy prompts run ~3 characters a token
+            if est + self.s.llm_max_tokens > self.s.llm_context_tokens:
+                log.warning("LLM %s prompt is ~%s tokens: with LLM_MAX_TOKENS=%s it may not fit the %s-token context",
+                            schema.__name__, est, self.s.llm_max_tokens, self.s.llm_context_tokens)
         attempts = self.s.llm_max_retries + 1
         last_err: Exception | None = None
         cut_off = 0
@@ -108,8 +144,16 @@ class LLMClient:
             content = choice.message.content or ""
             finish = choice.finish_reason
             used = getattr(resp.usage, "completion_tokens", None) if resp.usage else None
-            log.info("LLM %s %s attempt %s/%s: %.1fs, finish=%s, %s output tokens",
-                     self.s.llm_model, schema.__name__, attempt, attempts, dt, finish, used)
+            prompt_tokens = getattr(resp.usage, "prompt_tokens", None) if resp.usage else None
+            log.info("LLM %s %s attempt %s/%s: %.1fs, finish=%s, %s prompt + %s output tokens",
+                     self.s.llm_model, schema.__name__, attempt, attempts, dt, finish, prompt_tokens, used)
+            if finish == "length" and used is not None and used < self.s.llm_max_tokens - 16:
+                # Stopped well short of max_tokens: the context window ran out, not the reply cap. The same prompt
+                # would hit the same wall, so say so now instead of spending more attempts.
+                raise LLMError(
+                    f"The {schema.__name__} reply was cut off by the model's context window, not LLM_MAX_TOKENS: "
+                    f"the prompt ({prompt_tokens} tokens) left room for only {used} tokens of reply. Give the model "
+                    f"a longer context (Ollama: num_ctx / OLLAMA_CONTEXT_LENGTH) or shrink this prompt.")
             if finish == "length":
                 # Cut off: the JSON is incomplete. Feeding it back as a "correction" only grows the prompt,
                 # so ask again from scratch.

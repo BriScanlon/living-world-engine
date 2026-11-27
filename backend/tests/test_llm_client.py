@@ -61,14 +61,14 @@ def test_reasoning_effort_is_sent_when_set(make_client):
 
 
 def test_a_cut_off_reply_is_retried_fresh_not_appended(make_client):
-    c, fake = make_client([_resp('{"answer": "loo', finish="length"), _resp('{"answer": "done"}')])
+    c, fake = make_client([_resp('{"answer": "loo', finish="length", tokens=4096), _resp('{"answer": "done"}')])
     assert c.structured("sys", "user", Reply).answer == "done"
     assert len(fake.calls[1]["messages"]) == 2  # same prompt again, the truncated JSON wasn't fed back
 
 
 def test_every_reply_cut_off_names_the_setting(make_client):
     from llm.client import LLMError
-    c, _ = make_client([_resp("{", finish="length")] * 3, LLM_MAX_TOKENS="64")
+    c, _ = make_client([_resp("{", finish="length", tokens=64)] * 3, LLM_MAX_TOKENS="64")
     with pytest.raises(LLMError, match="LLM_MAX_TOKENS=64"):
         c.structured("sys", "user", Reply)
 
@@ -91,5 +91,17 @@ def test_timeouts_and_server_errors_retry_but_client_errors_do_not(make_client):
     c, fake = make_client([openai.NotFoundError("no such model", response=httpx.Response(404, request=req), body=None),
                            _resp('{"answer": "never"}')])
     with pytest.raises(openai.NotFoundError):
+        c.structured("sys", "user", Reply)
+    assert len(fake.calls) == 1
+
+
+def test_a_context_window_cut_off_says_so_and_stops(make_client):
+    """Stopped well short of max_tokens: the context ran out. Retrying the same prompt can't help (#24)."""
+    from llm.client import LLMError
+    resp = _resp('{"answer": "lo', finish="length", tokens=3308)
+    resp.usage.prompt_tokens = 13075
+    c, fake = make_client([resp, _resp('{"answer": "never"}')], LLM_MAX_TOKENS="8192")
+    with pytest.raises(LLMError, match=r"context window, not LLM_MAX_TOKENS: the prompt \(13075 tokens\) "
+                                       r"left room for only 3308"):
         c.structured("sys", "user", Reply)
     assert len(fake.calls) == 1

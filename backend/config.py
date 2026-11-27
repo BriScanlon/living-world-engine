@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # Cap on each reply, so a model that starts looping stops instead of running until the timeout.
     # The largest legitimate reply seen so far is about 1.5K tokens (lore extraction).
     llm_max_tokens: int = 4096
+    # The model's context window in tokens, if known (0 = unknown): only used to warn before sending a prompt that
+    # likely won't fit with room for LLM_MAX_TOKENS of reply.
+    llm_context_tokens: int = 0
     # Sent as reasoning_effort when set: none | low | medium | high ("none" turns a reasoning model's thinking off).
     llm_reasoning_effort: Literal["", "none", "minimal", "low", "medium", "high"] = ""
 

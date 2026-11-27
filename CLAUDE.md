@@ -116,7 +116,15 @@ rumors.
   invalid JSON is corrected in conversation, a reply cut off at `LLM_MAX_TOKENS` is retried fresh, timeouts/5xx
   retry, other 4xx raise; every attempt is logged (time, finish reason, tokens). `LLM_JSON_MODE`: `json_object` |
   `json_schema` (use this with Ollama: constrained decoding) | `none`. `LLM_REASONING_EFFORT` (`none`..`high`) is
-  sent as `reasoning_effort` when set; `none` stops a reasoning model (qwen3.8) thinking before its JSON.
+  sent as `reasoning_effort` when set; `none` stops a reasoning model (qwen3.8) thinking before its JSON. In
+  `json_schema` mode the system prompt carries `schema_outline()` (~1K chars) instead of the full schema (~5K). A
+  `length` finish well short of `LLM_MAX_TOKENS` means the **context window** ran out: it raises at once, naming the
+  prompt size (`LLM_CONTEXT_TOKENS`, if set, also warns before sending).
+- **Prompts** (`simulation/prompts.py`) are compact JSON (`_dump`). The arbiter is called per group from
+  `arbiter_groups()`: intents sharing an agent, target or the target's controller are resolved together, unrelated
+  groups are packed into calls of at most `MAX_GROUP` (6) intents, run in parallel up to `LLM_CONCURRENCY`; intents
+  reach it through `brief_intent()` (no empty fields, reasoning capped at 200 chars). Mock mode calls
+  `mock.arbiter` once per round as before.
 - Five call sites, each with a mock twin in `llm/mock.py`: session delta, agent intent, arbiter, rumors
   (`simulation/engine.py`), lore extraction (`ingestion/extract.py`). The VTT has its own optional LLM (prompt
   expansion) behind `VTT_MOCK_AI_PIPELINE`.
@@ -127,6 +135,8 @@ rumors.
   PC to `qwen3.8:27b-16k` (qwen3.8:27b at a 16K context, since 32K won't fit in 20 GB; reasoning model: set
   `LLM_REASONING_EFFORT=none`). A native
   Anthropic SDK backend was discussed but not built (it would be a second client chosen by a setting).
+- First full forecasts (#24): before the arbiter split, its single prompt was ~13K tokens and failed a 16K
+  context; `OLLAMA_KV_CACHE_TYPE=q8_0` breaks Ollama's JSON-schema grammar (empty replies, HTTP 200).
 - **Ollama setup that matters:** `OLLAMA_CONTEXT_LENGTH` of 8192 or more (the default 4096 silently truncates the
   ~4.8K session-notes prompt); `ollama ps` must say `100% GPU` (another resident model drops it to <1 tok/s); on
   Windows + AMD run Ollama natively, since Docker Desktop/WSL2 exposes only `/dev/dxg`, which `ollama:rocm` can't use.
