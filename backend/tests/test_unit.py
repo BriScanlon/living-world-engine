@@ -120,3 +120,17 @@ def test_session_numbers_come_from_session_names_only():
     assert session_number("import/azgaar-region-trial-3433") is None
     assert session_number("setup/kingdoms") is None and session_number("vtt/main") is None
     assert session_number("ingest/2026-11-27-recap") is None
+
+
+def test_the_wizard_links_to_the_self_hosted_map_generator(monkeypatch):
+    from api.routes import wizard_spec
+    from config import get_settings
+    monkeypatch.setenv("FMG_PORT", "8070")
+    get_settings.cache_clear()
+    try:
+        assert wizard_spec()["fmg_port"] == 8070
+        monkeypatch.delenv("FMG_PORT")
+        get_settings.cache_clear()
+        assert wizard_spec()["fmg_port"] is None  # not running: no link
+    finally:
+        get_settings.cache_clear()

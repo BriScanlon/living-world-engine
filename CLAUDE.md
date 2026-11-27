@@ -20,6 +20,7 @@ screen, with a DM-only screen fed by the engine. Everything runs in **mock mode*
 | `backend` | 8000 | FastAPI world engine (`backend/`), `/docs` for OpenAPI |
 | `frontend` | 5173 | React DM dashboard (`frontend/`), proxies `/api` to backend |
 | `vtt` | 8080 | VTT: FastAPI + SQLite + WebSockets, serves its built React app (`/dm`, `/table`) |
+| `fmg` | 8070 | Azgaar's Fantasy Map Generator (MIT), self-hosted: `fmg/Dockerfile` builds upstream tag `FMG_REF` |
 
 The backend reaches the VTT at `VTT_URL=http://vtt:8000` and host services (Ollama, ComfyUI) via
 `host.docker.internal` (mapped with `host-gateway`). Settings live in `.env` (copy `.env.example`); VTT settings are
@@ -187,6 +188,10 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
 - On the original Windows PC, application control blocks `.exe` launchers in the venv and node_modules: run
   `python -m pytest`, not `pytest`; `gh` and Docker live in WSL. Git Bash mangles `/mnt/...` paths and some long
   heredocs: write patch scripts to a file and run them.
+- **Self-hosted Azgaar (`fmg/`)**: built from the upstream repo at a pinned tag with `vite build --mode electron`
+  (relative base, no Google Analytics; upstream's own Dockerfile misses `scripts/` and `docs/`). Its CSP needs
+  `'unsafe-eval'` (the generation step "goods" evaluates code). v1.157's Full JSON has every field the importer
+  reads; its default map is the whole globe with ~900 burgs, so ask for smaller maps for campaigns.
 - **Atlas labels** are symbol layers (`label-*` in `Atlas.tsx`) using glyphs from `/fonts/{fontstack}/{range}.pbf`
   (`frontend/public/fonts`, 3 Noto Sans faces x 3 ranges). A name using characters outside those ranges needs that range
   copied from the pinned commit in `public/fonts/README.md`; nginx returns 404 (not index.html) for a missing one.

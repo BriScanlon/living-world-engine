@@ -21,6 +21,7 @@ export type WizardField = {
 };
 
 export interface WizardSpec {
+  fmg_port?: number | null;  // the self-hosted map generator, when it runs
   approaches: Record<string, { label: string; order: string[]; blurb: string }>;
   focuses: Record<string, { label: string; defaults: WizardAnswers }>;
   steps: Record<string, { title: string; guide: string; fields: WizardField[] }>;

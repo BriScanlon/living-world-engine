@@ -181,6 +181,13 @@ export default function NewWorld({ onSwitched }: { onSwitched: () => void }) {
                   </Field>
                   {vals.source === "azgaar" && (
                     <div className="rounded-lg border border-dashed border-ink-600 p-3 text-sm text-ink-300">
+                      {spec.fmg_port && (
+                        <p className="mb-2">
+                          <a className="text-ember-300 hover:text-ember-400" target="_blank" rel="noreferrer"
+                            href={`${location.protocol}//${location.hostname}:${spec.fmg_port}/`}>Open the map generator ↗</a>{" "}
+                          <span className="text-xs text-ink-400">(self-hosted Azgaar). For a campaign-sized map, lower its Options → Map size and Burgs number before generating.</span>
+                        </p>
+                      )}
                       Upload the file from Azgaar's <b>Export → Export to JSON → Full</b>.{" "}
                       <label className="cursor-pointer text-ember-300 hover:text-ember-400">
                         Choose file

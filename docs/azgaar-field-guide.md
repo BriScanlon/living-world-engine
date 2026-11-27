@@ -4,13 +4,16 @@
 
 How to build a campaign world in [Azgaar's Fantasy Map Generator](https://azgaar.github.io/Fantasy-Map-Generator/) and bring it into the engine's World Atlas, mapped from a walkthrough of every menu.
 
+**Self-hosted:** the stack runs its own copy at `http://<this-machine>:8070` (the `fmg` service, pinned to
+v1.157.0; see [fmg/README.md](../fmg/README.md)), and the wizard's *Use my Azgaar export* links to it.
+
 ## Workflow at a glance
 
 Nine steps take a world from blank settings to the engine's globe; steps 1–3 decide the planet, 4–6 shape it, 7–9 hand it over.
 
 1. **Open the menu** with the ▶ arrow, top left. Close the release notes first.
 2. **Options tab**: set heightmap template, cultures (number and name set), states, burgs and religions. These apply to the *next* new map.
-3. **Configure World** (*Climate*): press **Whole world** so the map wraps the entire planet, then tune equator temperature, poles and precipitation.
+3. **Configure World** (*Climate*): for a campaign, keep the map **regional** (a few realms to a continent, lower *Map size*) rather than pressing **Whole world**: a planet-sized map makes journeys months long and gives the engine far more burgs than it should hold (keep *Burgs number* to a few hundred). Then tune equator temperature, poles and precipitation.
 4. **New Map** (bottom of the menu). Repeat until the coastlines feel right; the **Map seed** reproduces any map you like.
 5. **Lore**: name the map, set the year and era, add a description. The map name becomes the atlas name in the engine.
 6. **Shape it in Tools**: edit states, provinces, cultures, religions, burgs, rivers and diplomacy; lock anything you want kept before regenerating.
