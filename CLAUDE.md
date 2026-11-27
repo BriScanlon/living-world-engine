@@ -186,6 +186,12 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
 - On the original Windows PC, application control blocks `.exe` launchers in the venv and node_modules: run
   `python -m pytest`, not `pytest`; `gh` and Docker live in WSL. Git Bash mangles `/mnt/...` paths and some long
   heredocs: write patch scripts to a file and run them.
+- **Atlas labels** are symbol layers (`label-*` in `Atlas.tsx`) using glyphs from `/fonts/{fontstack}/{range}.pbf`
+  (`frontend/public/fonts`, 3 Noto Sans faces x 3 ranges). A name using characters outside those ranges needs that range
+  copied from the pinned commit in `public/fonts/README.md`; nginx returns 404 (not index.html) for a missing one.
+  Don't go back to HTML `Marker`s for labels: on the globe they fade to `opacityWhenCovered` (0.2) instead of hiding.
+- The Chrome extension may drive a browser on **another machine**: `localhost` then fails; use the LAN IP
+  (`http://192.168.4.99:5173`). Screenshots of the WebGL globe can time out; `javascript_tool` still works.
 - Browser-pane testing of the atlas: a hidden pane has no `requestAnimationFrame`, so inject
   `window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16)` before opening the atlas, and
   open it with the nav button (the app reads the hash only on load; navigating to a new hash does not reload).
@@ -222,7 +228,7 @@ Real model: forecasts run end to end on the GPU PC (`qwen3.8:27b-24k`, flash att
 (a live run resumed twice), #24 (arbiter context; grouped arbiter calls), #30 (goal clocks handing over lost
 conquests), #31 (diplomacy timed as army marches).
 
-Backlog: real map labels on the globe (needs bundled fonts/glyphs), homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
+Backlog: homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
 Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings;
 "Open in VTT" from the briefing (`place` on each event/rumor, `to-table` with `mark_visited: false`); LLM-written
-wizard prose (`wizard/prose.py`).
+wizard prose (`wizard/prose.py`); globe labels as symbol layers with bundled glyphs (`frontend/public/fonts`).

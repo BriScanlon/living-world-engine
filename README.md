@@ -194,6 +194,11 @@ A MapLibre GL **globe** of the campaign planet that shows the simulation for any
   feature-state, so dragging the day slider recolours borders without re-tiling), places with who is there,
   events of the last 30 days (ringed when new on the branch), and tavern rumors. `GET /api/atlas/place/{id}` gives
   a place's holder, people, history and rumors.
+* **Labels** are real MapLibre symbol layers with glyphs bundled in `frontend/public/fonts` (Noto Sans, OFL; no
+  glyph server): continents and capitals on the whole globe, cities from zoom 3, towns from 4.5, taverns, manors and
+  other local places from 8, and province names (one per province, at its centre) from 3.2. They collide instead of
+  piling up, with the party's start town first, then capitals, cities, towns. Labels on the **far side of the globe
+  are not drawn**. In the party view only provinces the party knows are named (heard-of ones fainter).
 * **First run:** with `ATLAS_SAMPLE_ON_STARTUP=true` the backend generates a small sample planet *in Azgaar's Full JSON
   format* (`backend/atlas/sample_world.py`; hex cells instead of Voronoi), imports it, and places Greywater on a port
   town as a vassal of the local realm. Azgaar's repo only ships `.map` saves, which don't store cell polygons.

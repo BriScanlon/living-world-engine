@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { GeoJSONSource, Map as MlMap, Marker } from "maplibre-gl";
+import maplibregl, { GeoJSONSource, Map as MlMap } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, PartyKnows, PlaceDetail, VttMap } from "../api";
@@ -24,7 +24,6 @@ const EVENT_COLORS: [string, string][] = [
 export default function Atlas({ branches }: { branches: Branch[] }) {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
-  const markers = useRef<Marker[]>([]);
   const loadedSlug = useRef<string | null>(null);
   const openRef = useRef<(id: string) => void>(() => undefined);
   const footprintIds = useRef<string[]>([]);
@@ -90,6 +89,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       style: {
         version: 8,
         projection: { type: "globe" },
+        glyphs: `${location.origin}/fonts/{fontstack}/{range}.pbf`,
         sources: {},
         layers: [{ id: "space", type: "background", paint: { "background-color": "#16324f" } }],
       },
@@ -182,6 +182,20 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     map.addSource("rumors", { type: "geojson", data: empty });
     map.addSource("footprints", { type: "geojson", data: empty });
     map.addSource("route", { type: "geojson", data: empty });
+    // Province names: one label per province (a point at its centre, not per-tile polygon labels, which repeat), faint,
+    // once zoomed in a little; in the party view only the provinces the party knows are named
+    map.addSource("province-labels", { type: "geojson", data: empty });
+    map.addLayer({
+      id: "label-province", type: "symbol", source: "province-labels", minzoom: 3.2,
+      layout: {
+        "text-field": ["upcase", ["get", "name"]], "text-font": ["Noto Sans Italic"], "text-size": 10,
+        "text-letter-spacing": 0.15, "text-max-width": 8, "text-padding": 6, "symbol-sort-key": 10,
+      },
+      paint: {
+        "text-color": "#2a2418", "text-halo-color": "#f3ead2", "text-halo-width": 1.4,
+        "text-opacity": ["case", ["==", ["get", "known"], "heard"], 0.5, 0.8],
+      },
+    });
     map.addLayer({
       id: "route", type: "line", source: "route",
       layout: { "line-cap": "round", "line-join": "round" },
@@ -213,6 +227,36 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       id: "rumors", type: "circle", source: "rumors",
       paint: { "circle-radius": 3, "circle-color": "#a78bfa", "circle-stroke-color": "#0d0f12", "circle-stroke-width": 1, "circle-translate": [8, -8] },
     });
+    // Place names as real map labels (glyphs bundled in /fonts): they collide instead of piling up, the start town and
+    // capitals win, smaller places appear as you zoom in, and nothing on the far side of the globe is drawn.
+    const placeLabel = (id: string, filter: any, minzoom: number, size: number, font = "Noto Sans Regular") =>
+      map.addLayer({
+        id, type: "symbol", source: "places", minzoom, filter,
+        layout: {
+          "text-field": ["get", "name"], "text-font": [font], "text-size": size, "text-anchor": "bottom",
+          "text-offset": [0, -0.6], "text-max-width": 9, "text-padding": 3,
+          "symbol-sort-key": ["case", ["==", ["get", "start"], true], 0, ["==", ["get", "kind"], "capital"], 1,
+            ["==", ["get", "kind"], "city"], 2, ["==", ["get", "kind"], "town"], 3, 4],
+        },
+        paint: {
+          "text-color": ["case", ["==", ["get", "start"], true], "#f5c77e", ["get", "campaign"], "#f3d9a8", "#e6eaf0"],
+          "text-halo-color": "#0b0f16", "text-halo-width": 1.4, "text-halo-blur": 0.4,
+        },
+      });
+    map.addLayer({
+      id: "label-continent", type: "symbol", source: "places", maxzoom: 4.5, filter: ["==", ["get", "kind"], "continent"],
+      layout: {
+        "text-field": ["upcase", ["get", "name"]], "text-font": ["Noto Sans Italic"], "text-size": 14,
+        "text-letter-spacing": 0.25, "text-max-width": 12,
+      },
+      paint: { "text-color": "#f3ead2", "text-opacity": 0.85, "text-halo-color": "#0b0f16", "text-halo-width": 1.2 },
+    });
+    const notStart = ["!=", ["get", "start"], true];  // the start town has its own (capital) label
+    placeLabel("label-local", ["all", notStart, ["!", ["in", ["get", "kind"], ["literal", ["continent", "capital", "city", "town"]]]]], 8, 11);
+    placeLabel("label-town", ["all", notStart, ["==", ["get", "kind"], "town"]], 4.5, 11);
+    placeLabel("label-city", ["all", notStart, ["==", ["get", "kind"], "city"]], 3, 12);
+    placeLabel("label-capital", ["any", ["==", ["get", "kind"], "capital"], ["==", ["get", "start"], true]], 0, 12.5,
+      "Noto Sans Medium");
     const pick = (layer: string) => (e: maplibregl.MapLayerMouseEvent) => {
       const f = e.features?.[0];
       if (!f) return;
@@ -245,6 +289,13 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       );
     }
     (map.getSource("places") as GeoJSONSource).setData(state.places);
+    (map.getSource("province-labels") as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: Object.values(state.provinces)
+        .filter((p) => p.name && p.lon !== null && p.lat !== null && (state.view !== "party" || p.known))
+        .map((p) => ({ type: "Feature", properties: { name: p.name, known: p.known },
+          geometry: { type: "Point", coordinates: [p.lon as number, p.lat as number] } })),
+    });
     const evs = showSecret ? state.events : { ...state.events, features: state.events.features.filter((f) => f.properties?.visibility !== "secret") };
     (map.getSource("events") as GeoJSONSource).setData(evs);
     (map.getSource("rumors") as GeoJSONSource).setData(state.rumors);
@@ -271,22 +322,6 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         coordinates: f.corners as [[number, number], [number, number], [number, number], [number, number]] });
       map.addLayer({ id: sid, type: "raster", source: sid, minzoom: 11, paint: { "raster-opacity": 0.92 } }, "footprint-line");
     }
-    // HTML labels (no glyph server needed): capitals and the campaign's own places
-    markers.current.forEach((m) => m.remove());
-    markers.current = state.places.features
-      .filter((f) => ["capital", "continent"].includes(f.properties?.kind) || f.properties?.start)
-      .map((f) => {
-        const el = document.createElement("div");
-        el.textContent = f.properties?.name;
-        el.className = "atlas-label";
-        const continent = f.properties?.kind === "continent";
-        el.style.cssText = continent
-          ? "font:italic 600 14px Georgia,serif;letter-spacing:.12em;text-transform:uppercase;color:#f3ead2;opacity:.85;text-shadow:0 0 4px #000;pointer-events:none;white-space:nowrap"
-          : `font:600 11px system-ui;color:${f.properties?.start ? "#f5c77e" : "#e6eaf0"};text-shadow:0 0 3px #000,0 0 2px #000;pointer-events:none;transform:translateY(-12px);white-space:nowrap`;
-        return new maplibregl.Marker({ element: el, anchor: "bottom" })
-          .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
-          .addTo(map);
-      });
   }, [state, showSecret]);
 
   const openDetail = useCallback(
