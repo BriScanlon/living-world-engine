@@ -96,3 +96,17 @@ def test_mock_agent_intents_are_deterministic_and_epistemically_valid():
 def test_slugify():
     assert slugify("Lord Aldric Vane") == "lord-aldric-vane"
     assert slugify("Café ‘Noir’!") == "cafe-noir"
+
+
+def test_forecast_branch_names_never_collide_within_a_second():
+    import re
+    from datetime import datetime, timezone
+
+    from graph.store import to_branch_id
+    from simulation.engine import branch_name
+    now = datetime(2026, 11, 27, 13, 49, 25, tzinfo=timezone.utc)
+    names = {branch_name(14, now) for _ in range(200)}       # a double-clicked Run, a re-run, a fast test loop
+    assert len(names) == 200
+    name = names.pop()
+    assert re.fullmatch(r"forecast/session-14-20261127t134925-[0-9a-f]{4}", name)  # readable, sorts by time
+    assert "/" not in to_branch_id(name)
