@@ -32,7 +32,7 @@ export default function Forecaster({ health, onOpenBriefing, onChanged }: {
   const esRef = useRef<EventSource | null>(null);
 
   const loadStalled = () =>
-    api.forecasts().then((rs) => setStalled(rs.filter((r) => r.resumable))).catch(() => undefined);
+    api.forecasts().then((rs) => setStalled(rs.filter((r) => r.resumable || r.running_elsewhere))).catch(() => undefined);
   useEffect(() => { loadStalled(); }, []);
 
   /** Follow a run's progress events (from the start: a resumed run replays its earlier steps first). */
@@ -130,19 +130,29 @@ export default function Forecaster({ health, onOpenBriefing, onChanged }: {
     <div className="grid gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       {stalled.length > 0 && (
         <div className="lg:col-span-2">
-          <Card title="Unfinished forecasts" subtitle="Interrupted by a restart, or stopped by an error. Resume picks up after the last finished step.">
+          <Card title="Unfinished forecasts" subtitle="Interrupted by a restart, or stopped by an error: Resume picks up after the last finished step. A forecast another process is still running can only be watched.">
             <ul className="space-y-2 text-sm">
               {stalled.map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center gap-3">
-                  <Badge tone={r.status === "interrupted" ? "ember" : "red"}>{r.status}</Badge>
+                  <Badge tone={r.running_elsewhere ? "blue" : r.status === "interrupted" ? "ember" : "red"}>
+                    {r.running_elsewhere ? "running elsewhere" : r.status}
+                  </Badge>
                   <span className="text-ink-100">Session {r.request.session_number}</span>
                   <span className="text-xs text-ink-400">
-                    days {r.request.end_day}–{r.request.end_day + r.request.forecast_days} · next step {r.next_step}
+                    days {r.request.end_day}–{r.request.end_day + r.request.forecast_days}
+                    {r.running_elsewhere ? ` · in ${r.owner}` : ` · next step ${r.next_step}`}
                     {r.error ? ` · ${r.error}` : ""}
                   </span>
-                  <Button className="ml-auto" disabled={status === "running"} onClick={() => resume(r)}>
-                    ▶ Resume
-                  </Button>
+                  {r.running_elsewhere ? (
+                    <Button className="ml-auto" variant="ghost" disabled={status === "running"} onClick={() => follow(r.id, r.branch)}
+                      title="Follow its progress; it keeps running in its own process">
+                      Watch
+                    </Button>
+                  ) : (
+                    <Button className="ml-auto" disabled={status === "running"} onClick={() => resume(r)}>
+                      ▶ Resume
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

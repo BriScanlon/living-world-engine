@@ -224,6 +224,9 @@ export interface RunSummary {
   updated_at: number;
   resumable: boolean;
   next_step: string | null;
+  /** Being run by another live process (e.g. scripts/forecast_check.py): watch it, don't resume it. */
+  running_elsewhere: boolean;
+  owner: string | null;
 }
 
 export interface AtlasState {

@@ -24,7 +24,7 @@ from ingestion import audio, documents
 from ingestion.pipeline import JOBS, Source, start_job
 from simulation.engine import resume_forecast, start_forecast
 from simulation.models import ForecastRequest
-from simulation.runs import registry
+from simulation.runs import RunBusy, registry
 
 router = APIRouter(prefix="/api")
 
@@ -99,9 +99,19 @@ class MergeBody(BaseModel):
     delete_after: bool = False
 
 
+def _not_while_running(name: str, what: str) -> None:
+    """Refuse to touch a forecast branch that is still being written (here or by another process)."""
+    run = registry.active_on_branch(to_branch_id(name))
+    if run:
+        where = "in another process" if run.running_elsewhere else "here"
+        raise HTTPException(409, f"Can't {what} {name}: its forecast is still running {where} "
+                                 f"(run {run.id}); wait for it to finish")
+
+
 @router.post("/branches/{name:path}/merge")
 def merge(name: str, body: MergeBody | None = None) -> dict[str, Any]:
     body = body or MergeBody()
+    _not_while_running(name, "merge")
     store = _store()
     try:
         run = load_run(WorldView(store.all_documents(name)), name)
@@ -120,6 +130,7 @@ class CherryPickBody(BaseModel):
 
 @router.post("/branches/{name:path}/cherry-pick")
 def cherry_pick(name: str, body: CherryPickBody) -> dict[str, Any]:
+    _not_while_running(name, "cherry-pick from")
     try:
         return _store().cherry_pick(name, body.event_ids, body.target)
     except Exception as e:  # noqa: BLE001
@@ -128,6 +139,7 @@ def cherry_pick(name: str, body: CherryPickBody) -> dict[str, Any]:
 
 @router.delete("/branches/{name:path}")
 def discard(name: str) -> dict[str, Any]:
+    _not_while_running(name, "discard")
     try:
         _store().delete_branch(name)
     except (GraphStoreError, Exception) as e:  # noqa: BLE001
@@ -138,6 +150,7 @@ def discard(name: str) -> dict[str, Any]:
 @router.post("/branches/{name:path}/rerun")
 def rerun(name: str) -> dict[str, Any]:
     """Discard a forecast branch and run a fresh forecast with the same inputs."""
+    _not_while_running(name, "re-run")
     store = _store()
     run = load_run(WorldView(store.all_documents(name)), name)
     live = next((r for r in registry.all() if to_branch_id(r.branch) == to_branch_id(name)), None)
@@ -657,7 +670,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
         run = resume_forecast(run_id)
     except KeyError as e:
         raise HTTPException(404, "Unknown run") from e
-    except ValueError as e:
+    except (RunBusy, ValueError) as e:
         raise HTTPException(409, str(e)) from e
     return {"run_id": run.id, "branch": run.branch}
 
@@ -672,6 +685,7 @@ async def forecast_events(run_id: str) -> StreamingResponse:
     async def gen():
         sent = 0
         while True:
+            registry.get(run_id)  # a run in another process is re-read from disk (refreshed in place)
             while sent < len(run.events):
                 yield f"data: {json.dumps(run.events[sent], default=str)}\n\n"
                 sent += 1

@@ -1,5 +1,6 @@
 """Forecast runs survive a restart: records and checkpoints on disk, interrupted runs resume where they stopped."""
 import json
+import time
 import uuid
 
 import pytest
@@ -80,11 +81,13 @@ def test_an_interrupted_run_resumes_where_it_stopped(store, runs_dir, monkeypatc
     # the process dies with the run marked running; a new process finds it interrupted
     path = runs_dir / f"{run.id}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    data["status"] = "running"
+    data.update(status="running", owner={"host": "old-backend", "pid": 1, "boot": "deadbeef"},
+                heartbeat_at=time.time() - 3600)  # its process went quiet an hour ago
     path.write_text(json.dumps(data), encoding="utf-8")
     registry.reload()
     run = registry.get(run.id)
     assert run.status == "interrupted" and run.resumable and "propagate_rumors" in run.events[-1]["message"]
+    assert "old-backend:1" in run.error
 
     final = run_sync(run, store=store, settings=store.s, resume=True)
     assert run.status == "complete" and any(e["kind"] == "resume" for e in run.events)
@@ -129,3 +132,83 @@ def test_resume_through_the_api_path_runs_in_the_background(store, runs_dir, mon
         time.sleep(0.2)
     assert run.status == "complete", run.error
     assert "after" not in (run.error or "")
+
+
+
+def _foreign(runs_dir, run, *, heartbeat_age, status="running"):
+    """Rewrite a run's file as if another process (a script in `docker compose exec`) owned it."""
+    path = runs_dir / f"{run.id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(status=status, owner={"host": "backend-container", "pid": 4242, "boot": "otherproc"},
+                heartbeat_at=time.time() - heartbeat_age)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_a_run_another_live_process_owns_is_left_alone(store, runs_dir):
+    """The bug in #23: the backend marked a script's live run interrupted and let the dashboard resume it."""
+    from simulation.engine import resume_forecast
+    from simulation.runs import RunBusy
+    run = registry.create(branch_name(36), _req(36).model_dump(), campaign=store.db)
+    run.checkpoint = {"next": "world_arbiter", "state": {}, "at": time.time()}
+    registry.save(run)
+    path = _foreign(runs_dir, run, heartbeat_age=5)
+    before = path.read_text(encoding="utf-8")
+
+    registry.reload()  # the backend starts, or first touches the registry, while the script is mid-forecast
+    seen = registry.get(run.id)
+    assert seen.status == "running" and seen.running_elsewhere and not seen.resumable
+    assert path.read_text(encoding="utf-8") == before  # nothing written to the other process's record
+    with pytest.raises(RunBusy, match="backend-container:4242"):
+        resume_forecast(run.id)
+    assert registry.active_on_branch(seen.branch.replace("/", "--")) is seen
+
+    # the other process makes progress: the registry shows it (SSE streams hold the same object)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["events"].append({"seq": 0, "ts": time.time(), "step": "world_arbiter", "kind": "start", "message": "x"})
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert registry.get(run.id) is seen and seen.events[-1]["step"] == "world_arbiter"
+
+
+def test_a_run_whose_process_went_quiet_becomes_resumable(store, runs_dir):
+    run = registry.create(branch_name(37), _req(37).model_dump(), campaign=store.db)
+    run.checkpoint = {"next": "world_arbiter", "state": {}, "at": time.time()}
+    registry.save(run)
+    _foreign(runs_dir, run, heartbeat_age=600)
+    registry.reload()
+    seen = registry.get(run.id)
+    assert seen.status == "interrupted" and seen.resumable and not seen.active
+    claimed = registry.claim(run.id)
+    assert claimed.mine and claimed.status == "queued"
+    from simulation.runs import RunBusy
+    with pytest.raises(RunBusy, match="already running here"):
+        registry.claim(run.id)
+
+
+def test_branch_controls_refuse_a_running_forecast(store, runs_dir):
+    from fastapi import HTTPException
+
+    from api.routes import _not_while_running
+    run = registry.create(branch_name(38), _req(38).model_dump(), campaign=store.db)
+    _foreign(runs_dir, run, heartbeat_age=3)
+    registry.reload()
+    with pytest.raises(HTTPException) as e:
+        _not_while_running(run.branch, "merge")
+    assert e.value.status_code == 409 and "another process" in e.value.detail
+    _foreign(runs_dir, run, heartbeat_age=3, status="complete")
+    registry.reload()
+    _not_while_running(run.branch, "merge")  # finished: fine to merge
+
+
+def test_heartbeat_keeps_a_long_step_alive(monkeypatch, runs_dir):
+    from simulation import runs as runs_mod
+    monkeypatch.setattr(runs_mod, "HEARTBEAT_EVERY", 0.05)
+    run = registry.create("forecast/hb", {"session_number": 1})
+    registry.set_status(run, "running")
+    run.heartbeat_at = time.time() - 1000
+    stop = registry.heartbeat(run)
+    time.sleep(0.3)
+    stop.set()
+    assert run.heartbeat_age < 1
+    saved = json.loads((runs_dir / f"{run.id}.json").read_text(encoding="utf-8"))
+    assert time.time() - saved["heartbeat_at"] < 1

@@ -537,7 +537,9 @@ def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | Non
     store = store or get_store()
     req = ForecastRequest(**run.request)
     if resume:
-        if not run.next_step:  # resume_forecast() has already checked the status
+        if not (run.mine and run.status == "queued"):  # not already claimed by resume_forecast()
+            run = registry.claim(run.id)
+        if not run.next_step:
             raise RuntimeError(f"Run {run.id} has no checkpoint to resume from")
         state: SimState = {**run.checkpoint["state"], "resume_at": run.next_step}  # type: ignore[index]
         registry.emit(run.id, "resume", "resume", f"Resuming from {run.next_step}", {"next": run.next_step})
@@ -549,6 +551,7 @@ def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | Non
             "rounds": plan_rounds(req.end_day, req.forecast_days, s), "round": 0,
         }
     registry.set_status(run, "running")
+    beating = registry.heartbeat(run)  # tells other processes this run is alive, even during long model calls
     try:
         final = GRAPH.invoke(state, {"configurable": {"ctx": Ctx(store, s)}, "recursion_limit": 200})
         result = {"branch": run.branch, "events": len(final.get("event_reports", [])),
@@ -562,6 +565,8 @@ def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | Non
         registry.emit(run.id, "error", "error", run.error, {"trace": traceback.format_exc()[-2000:],
                                                           "next": run.next_step})
         raise
+    finally:
+        beating.set()
 
 
 def start_forecast(req: ForecastRequest) -> Run:
@@ -574,14 +579,9 @@ def start_forecast(req: ForecastRequest) -> Run:
 
 def resume_forecast(run_id: str) -> Run:
     """Continue an interrupted or failed run from the node after its last checkpoint, on its own campaign."""
-    run = registry.get(run_id)
-    if not run:
-        raise KeyError(run_id)
-    if not run.resumable:
-        raise ValueError(f"This run is {run.status}" + ("" if run.next_step else " and has no checkpoint to resume from"))
+    run = registry.claim(run_id)  # RunBusy if another live process has it; KeyError / ValueError otherwise
     base = get_store()
     store = GraphStore(base.s, run.campaign) if run.campaign else base.bound()
-    registry.set_status(run, "queued")
     t = threading.Thread(target=lambda: _safe(run, store, resume=True), name=f"forecast-{run.id}", daemon=True)
     t.start()
     return run
