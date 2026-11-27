@@ -329,6 +329,74 @@ def run_agent_turns(state: SimState, config) -> dict[str, Any]:
             "_data": {"intents": [f"{i['agent_name']}: {i['action']} → {i['target_name'] or '—'}" for i in intents]}}
 
 
+# ---------------------------------------------------------------- arbiter consequences: who holds what, who travels how
+# Faction actions that move an army; at home a faction needs no journey; everything else a faction does far away
+# (envoys, ultimatums, agents and spies) goes by rider.
+ARMY_ACTIONS = {"attack", "seize"}
+HOME_ACTIONS = {"fortify", "recruit", "trade", "observe", "investigate", "negotiate", "ally", "threaten", "bribe"}
+
+
+def side_of(world: WorldView, agent_id: str | None) -> str | None:
+    """The side an agent fights and holds for: a character's faction, a faction itself, else the agent."""
+    d = world.get(agent_id) or {}
+    return (d.get("faction") or agent_id) if d.get("@type") == "Character" else agent_id
+
+
+def holder(m: Mutator, target: str, day: int) -> str | None:
+    """Who controls (else owns) ``target`` on ``day``, counting changes made earlier in this round."""
+    edges = m._active("ControlEdge", day, lambda d: d["target_id"] == target)
+    best = next((e for e in edges if e["kind"] == "CONTROLS"), None) or next(iter(edges), None)
+    return best["from_id"] if best else None
+
+
+def takes_control(goal: dict[str, Any]) -> bool:
+    """A goal whose completion hands its owner a place or an item (conquest, seizure, theft)."""
+    return str(goal.get("target") or "").startswith(("Location/", "Province/", "Item/"))
+
+
+def wins_target(world: WorldView, draft: WorldEventDraft, owner: str, target: str) -> bool:
+    """Does this event itself hand ``target`` to ``owner``'s side?"""
+    return any(cc.target_id == target and side_of(world, cc.new_controller_id) == side_of(world, owner)
+               for cc in draft.control_changes)
+
+
+def capped_goal_progress(world: WorldView, m: Mutator, draft: WorldEventDraft) -> dict[str, int]:
+    """The goal progress an event may really add (#30). A goal that takes a place or item can only be *finished* by
+    an event that wins its owner the target, or once the owner's side already holds it. Off-screen ticks and
+    progress from events that didn't win stop one segment short, so a clock never hands over a conquest the
+    arbiter ruled lost, or one whose army has not yet arrived."""
+    out: dict[str, int] = {}
+    for gid, amount in draft.goal_progress.items():
+        g = m.cur(gid)
+        if g and amount > 0 and g.get("status") == "active" and takes_control(g):
+            tgt = g["target"]
+            owned = side_of(world, holder(m, tgt, draft.day)) == side_of(world, g["owner"])
+            if not owned and not wins_target(world, draft, g["owner"], tgt):
+                amount = min(amount, max(0, g["clock_segments"] - 1 - g["clock_progress"]))
+        if amount > 0:
+            out[gid] = amount
+    return out
+
+
+def journey_pace(world: WorldView, draft: WorldEventDraft, action: str | None, dest: str | None) -> str | None:
+    """How an event's actor gets to ``dest`` (#31): ``army``, ``horse``, ``foot``, or None for no journey.
+
+    Chosen from the intent's **action**, not the event type (a real model labels a negotiation ``faction_move`` as
+    happily as a march). People walk. A faction marches only to attack or seize, or to fortify away from home; at
+    home it needs no journey; otherwise its envoys, agents and spies ride."""
+    actor = world.get(draft.actor_ids[0]) or {}
+    if actor.get("@type") != "Faction":
+        return "foot"
+    if action is None:  # no intent behind it (or the model didn't say): judge by the event type
+        return "army" if draft.event_type == "conflict" else "horse"
+    at_home = bool(dest) and side_of(world, world.controller_of(dest)) == actor["@id"]
+    if action in ARMY_ACTIONS:
+        return "army"
+    if at_home and action in HOME_ACTIONS:
+        return None
+    return "army" if action == "fortify" else "horse"
+
+
 @node("world_arbiter")
 def world_arbiter(state: SimState, config) -> dict[str, Any]:
     c = _ctx(config)
@@ -374,24 +442,29 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
     for i, d in enumerate(drafts):
         d.day = min(hi, max(lo + 1, lo + 1 + (i * span) // max(1, len(drafts))))
     # Nobody acts on a far-off place before they could get there: set out at the round's start, arrive, then act.
-    # Factions on the move march at army pace; everyone else walks. Late arrivals land after this round.
+    # The pace comes from what the actor set out to do (journey_pace). Late arrivals land after this round.
     trav = travel.for_world(world)
+    action_of = {i["agent_id"]: i.get("action") for i in intents}
     journeys: dict[int, dict[str, Any]] = {}
     for i, d in enumerate(drafts):
         if d.event_type in ("goal_progress", "goal_achieved") or not d.actor_ids:
             continue
         dest = d.location_id if world.get(d.location_id) else next((t for t in d.target_ids if world.get(t)), None)
-        actor = world.get(d.actor_ids[0]) or {}
-        pace = "army" if actor.get("@type") == "Faction" and d.event_type in ("conflict", "faction_move") else "foot"
-        days = trav.days(d.actor_ids[0], dest, pace) if dest else 0
+        action = next((action_of[a] for a in [*d.from_intents, d.actor_ids[0]] if a in action_of), None)
+        pace = journey_pace(world, d, action, dest)
+        days = trav.days(d.actor_ids[0], dest, pace) if dest and pace else 0
         if days and lo + days > d.day:
             d.day = lo + days
-            d.summary = f"{d.summary.rstrip()} ({'A march' if pace == 'army' else 'A journey'} of {days} day{'s' if days != 1 else ''}.)"
+            what = {"army": "A march", "horse": "A ride"}.get(pace, "A journey")
+            d.summary = f"{d.summary.rstrip()} ({what} of {days} day{'s' if days != 1 else ''}.)"
             journeys[i] = {"days": days, "pace": pace}
     m = Mutator(world, state["session_label"], (state["seed"], "round", r))
     reports = []
     known_events = {e["@id"] for e in world.of_type("Event")}
     for i, d in enumerate(drafts):
+        d.goal_progress = capped_goal_progress(world, m, d)
+        if d.event_type == "goal_progress" and not d.goal_progress and i >= len(result.events):
+            continue  # an off-screen tick with nothing left to add: the last step needs a victory
         rep = m.apply_event(d, i, caused_by_ok=known_events)
         reports.append({**rep, "round": r, "day": d.day, "summary": d.summary, "event_type": d.event_type,
                         "visibility": d.visibility, "caused_by": d.caused_by, "actors": d.actor_ids,
@@ -405,9 +478,12 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
             tgt = g.get("target")
             cc = []
             shifts = []
-            if tgt and tgt.startswith(("Location/", "Province/", "Item/")):
-                cc = [ControlChange(target_id=tgt, new_controller_id=g["owner"],
-                                    kind="OWNS" if tgt.startswith("Item/") else "CONTROLS")]
+            if takes_control(g):
+                # Finished only by a win or with the target already held (capped_goal_progress): hand it over
+                # unless the winning event already did
+                if side_of(world, holder(m, tgt, rep["day"])) != side_of(world, g["owner"]):
+                    cc = [ControlChange(target_id=tgt, new_controller_id=g["owner"],
+                                        kind="OWNS" if tgt.startswith("Item/") else "CONTROLS")]
             elif tgt and tgt.startswith(AGENTISH):
                 shifts = [RelationshipShift(from_id=tgt, to_id=g["owner"], delta=-25, reason=g["name"])]
             fin = WorldEventDraft(

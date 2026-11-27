@@ -155,6 +155,9 @@ A compiled LangGraph `StateGraph`:
 5. **`world_arbiter`** — resolves simultaneous intents (contests by resources/influence, fighting
    strength, relationships), emits `WorldEvent`s with relationship shifts, control changes, goal progress,
    new goals/fears, deaths, and knowledge gained; completed goal clocks fire consequences.
+   A clock whose goal takes a place or an item (conquest, seizure, theft) stops one segment short until its
+   owner actually wins the target: time and failed attempts bring it to the brink, only a victory finishes it,
+   so a goal never hands over what the arbiter ruled lost (or what an army hasn't yet reached).
 
    **Battle strength.** Attacks, seizures, thefts and sabotage weigh who actually fights
    (`simulation/strength.py`). Each side's people and creatures get a challenge rating from their own
@@ -289,7 +292,10 @@ Distance now matters in the world:
 * **Paces** follow the SRD's overland travel: 24 miles a day on foot, 30 on horseback, 12 for an army, news at 30 with
   riders and merchants; ships make 48 miles a day.
 * **In forecasts**, an actor acting on a far-off place sets out at the start of the round and acts on arrival
-  (factions on the move march at army pace); the event's summary says how long it took, and late arrivals land after
+  at the pace of what it set out to do: people walk; a faction's armies march (attack, seize, fortify abroad), its
+  envoys, agents and spies ride (negotiate, threaten, ally, investigate…), and at home it needs no journey. The
+  pace comes from the intent, not the event type a model gave it. The event's summary says how long it took (*A
+  march / A ride / A journey of N days*), and late arrivals land after
   the round. Rumors reach a far tavern only once news could get there, and the locals believe them from that day.
 * **In the atlas**, each place shows how far it is from where the party is (on foot, horseback, for an army, and how
   long news takes), and the route is drawn on the globe. `GET /api/travel?a=&b=` gives the same between any two

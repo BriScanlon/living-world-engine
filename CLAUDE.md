@@ -112,10 +112,12 @@ Several processes share the run files (backend, `forecast_check.py` via `docker 
 writes to another live process's run, re-reads it from disk when looked at, and marks it `interrupted` only after
 90 s without a heartbeat. `registry.claim()` (lock file) takes a run over before resuming; `RunBusy` -> HTTP 409.
 Branch controls (merge, cherry-pick, discard, re-run) refuse a branch with an active run (`_not_while_running`).
-A new node must be added to `NEXT`/`_next_node`, or resumes will route wrongly. Travel: an actor acting on a far place arrives `lo + travel days` (army pace for factions in
-conflict/faction_move; summary gets "(A journey of N days.)"); rumors land at `event day + news travel days`, and
+A new node must be added to `NEXT`/`_next_node`, or resumes will route wrongly. Travel: an actor acting on a far place arrives `lo + travel days` (`journey_pace`: chosen
+from the intent's action, not the event type: people walk, factions march only to attack/seize/fortify abroad,
+ride otherwise, and need no journey at home; summary gets "(A march|ride|journey of N days.)"); rumors land at `event day + news travel days`, and
 locals believe from then. Events/rumors may land after the window (future-dated); out-of-window events spawn no
-rumors.
+rumors. Goals that take a place or item (`takes_control`) are finished only by an event that wins the owner the
+target, or once it's held (`capped_goal_progress`): off-screen ticks stop one segment short.
 
 ## LLM
 
@@ -159,7 +161,7 @@ rumors.
 
 ```bash
 docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
-cd backend && python -m pytest -q               # 81 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
+cd backend && python -m pytest -q               # 99 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
 ```
@@ -176,6 +178,10 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
 
 ## Gotchas learned the hard way
 
+- Running the tests **inside the backend container** inherits `.env` through compose's `env_file`: `MOCK_LLM=false`,
+  `LLM_MAX_TOKENS` etc. make `test_llm_client` and `test_durable_runs` fail (and call the real model). Clear them:
+  `env -u MOCK_LLM -u LLM_MAX_TOKENS -u LLM_MODEL -u LLM_REASONING_EFFORT -u LLM_CONCURRENCY -u LLM_JSON_MODE python -m pytest -q`
+  (pytest isn't in the image: `pip install pytest` first).
 - On the original Windows PC, application control blocks `.exe` launchers in the venv and node_modules: run
   `python -m pytest`, not `pytest`; `gh` and Docker live in WSL. Git Bash mangles `/mnt/...` paths and some long
   heredocs: write patch scripts to a file and run them.
