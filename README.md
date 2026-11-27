@@ -212,6 +212,16 @@ AD&D *World Builder's Guidebook* (the order only; wording, options and tables ar
 | 4 Local area | starting town, tavern, the local power struggle, notable NPCs, party name, rarity of a contested magic item | two rival local factions, NPCs with conflicting WANTS / NEEDS / FEARS, debts and secrets, goal clocks, an SRD magic item both sides want, the party, opening rumors |
 | 5 History | years of history, ages, a defining catastrophe, a hero's saga, monster density, party level band | founding and wars (negative in-world days), the catastrophe and its lair, a legendary hero, SRD monsters in every province's wilds |
 
+**Prose by the model.** With a real model (`MOCK_LLM=false`) and *Have the model write descriptions* ticked (the
+default, under History), a last pass has the model rewrite the template descriptions of the most table-relevant
+things: the starting town's places, factions, notables and treasure first, then realms, faiths, rulers, gods, the
+hero and the history's events (up to 96, in batches of 12, `LLM_CONCURRENCY` at a time), in one extra
+`[setup] prose` commit. Provinces, wilds and monsters keep their short templates. The model is shown public facts
+only (never desires, relationships or goals) and told to keep every name, invent nothing named and write only what
+is commonly known, because agents read the descriptions of what they know. Anything unusable, and any batch that
+fails, keeps its template: a world always builds. On qwen3.8:27b (7900 XT) a small world's 57 descriptions take
+about a minute and a half. Mock mode leaves the templates alone.
+
 Every 🎲 rolls a field; *Surprise me* rolls a whole step. The approach changes the order you answer in; the world is
 always built planet-first because a town needs a planet to sit on.
 
@@ -503,7 +513,8 @@ backend/
   atlas/        azgaar.py (Azgaar Full JSON importer) · sample_world.py · service.py (tiles, live map state)
                 party.py (party view: what the party knows, DM marks) · party_map.py (the party's overland map)
                 travel.py (routes, roads, sea legs, travel days) · local.py (zoom-in maps of any spot)
-  wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step)
+  wizard/       spec.py (steps, choices, focuses) · builder.py (answers -> campaign, one commit per step) ·
+                prose.py (the model rewrites template descriptions; public facts only)
   srd/          srd_5_2_1.json (generated) · catalogue.py (lookups, biome bestiary, NPC templates, homebrew layer)
                 homebrew.py (the DM's own entries: library, validation, import/export, copies into worlds)
                 builders.py · briefing.py (4-part diff) · seed.py

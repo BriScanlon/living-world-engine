@@ -226,16 +226,17 @@ export default function NewWorld({ onSwitched }: { onSwitched: () => void }) {
         {job && (
           <Card title="Building" subtitle={job.result ? <span className="font-mono text-xs">{job.result.campaign}</span> : undefined}>
             <ol className="space-y-2 text-sm">
-              {STEP_GUIDE_ORDER.map((s, i) => {
+              {[...STEP_GUIDE_ORDER, ...(job.events.some((e) => e.step === "prose") ? ["prose"] : [])].map((s, i) => {
                 const done = job.events.find((e) => e.step === s && e.kind === "done");
-                const started = job.events.find((e) => e.step === s && e.kind === "start");
+                // the prose pass reports each batch: show the latest
+                const started = [...job.events].reverse().find((e) => e.step === s && (e.kind === "start" || e.kind === "progress"));
                 return (
                   <li key={s} className="flex gap-2">
                     <span className={cx("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ring-1",
                       done ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/50" : started ? "animate-pulse bg-ember-500/20 text-ember-300 ring-ember-400" : "bg-ink-800 text-ink-400 ring-ink-600")}>
                       {done ? "✓" : i + 1}
                     </span>
-                    <span className={done ? "text-ink-200" : "text-ink-400"}>{done ? done.message : started ? started.message + "…" : spec.steps[s].title}</span>
+                    <span className={done ? "text-ink-200" : "text-ink-400"}>{done ? done.message : started ? started.message + "…" : spec.steps[s]?.title ?? "Descriptions"}</span>
                   </li>
                 );
               })}
