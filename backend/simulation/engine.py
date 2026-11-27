@@ -12,6 +12,7 @@ import logging
 import math
 import threading
 import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -614,8 +615,10 @@ def plan_rounds(end_day: int, forecast_days: int, s: Settings) -> list[list[int]
 
 
 def branch_name(session_number: int, now: datetime | None = None) -> str:
+    """``forecast/session-14-20261127t134925-3f9a``: readable, sorts by time, and the random tail keeps two forecasts
+    started in the same second (a double-clicked Run, a re-run, a test) from asking for the same branch."""
     now = now or datetime.now(timezone.utc)
-    return f"forecast/session-{session_number}-{now.strftime('%Y%m%dt%H%M%S')}"
+    return f"forecast/session-{session_number}-{now.strftime('%Y%m%dt%H%M%S')}-{uuid.uuid4().hex[:4]}"
 
 
 def run_sync(run: Run, store: GraphStore | None = None, settings: Settings | None = None, *,
