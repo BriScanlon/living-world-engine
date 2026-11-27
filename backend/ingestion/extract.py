@@ -21,6 +21,7 @@ class ExtractedNode(BaseModel):
     description: str | None = None
     role: str | None = None
     location_type: str | None = None
+    species: str | None = Field(default=None, description="A Character's people (e.g. Elf, or one from CATALOGUE)")
 
 
 class ExtractedEdge(BaseModel):
@@ -50,7 +51,9 @@ Return only nodes and edges that the TEXT itself mentions or clearly implies:
 Infer plausible WANTS/NEEDS from motives the TEXT describes.
 NAMES is a lookup table for naming only, not content to extract: when the TEXT refers to one of those entities
 (by name, title or nickname), use the exact name from NAMES and list a new nickname as an alias. Never return an
-entity from NAMES that the TEXT does not refer to. If the TEXT mentions nothing new, return empty lists."""
+entity from NAMES that the TEXT does not refer to. If the TEXT mentions nothing new, return empty lists.
+CATALOGUE (when given) lists the campaign's own creatures, peoples and treasures that the TEXT names: use those exact
+names. A creature is a Monster node, a treasure an Item node, and a people is a Character's species, not a node."""
 
 MAX_NAMES = 60
 _CAPS = re.compile(r"\b[A-Z][\w'’-]+(?:\s+(?:of|the|de|von)?\s*[A-Z][\w'’-]+){0,4}")
@@ -73,10 +76,13 @@ def relevant_names(chunk: str, resolver: EntityResolver, limit: int = MAX_NAMES)
     return names[:limit]
 
 
-def llm_extract(chunk: str, known: list[str]) -> ExtractionResult:
+def llm_extract(chunk: str, known: list[str], catalogue: list[dict[str, str]] | None = None) -> ExtractionResult:
     from llm.client import get_llm
 
-    user = json.dumps({"TEXT": chunk, "NAMES": known[:MAX_NAMES]})
+    payload: dict = {"TEXT": chunk, "NAMES": known[:MAX_NAMES]}
+    if catalogue:
+        payload["CATALOGUE"] = catalogue
+    user = json.dumps(payload)
     return get_llm().structured(SYSTEM, user, ExtractionResult, temperature=0.1)
 
 
@@ -86,9 +92,11 @@ def _words(s: str) -> str:
 
 
 def _in_text(name: str, text: str) -> bool:
+    """Does the name occur in the text as whole words? A plural counts ("Marsh Wights" grounds "Marsh Wight")."""
     from ingestion.resolution import strip_honorifics
     t = f" {_words(text)} "
-    return any(f" {k} " in t for k in {_words(name), _words(strip_honorifics(name))} if len(k) > 2)
+    return any(re.search(rf" {re.escape(k)}(?:s|es)? ", t) for k in {_words(name), _words(strip_honorifics(name))}
+               if len(k) > 2)
 
 
 def ground(result: ExtractionResult, chunk: str, resolver: EntityResolver) -> ExtractionResult:
@@ -156,7 +164,7 @@ def guess_type(name: str) -> str:
     return "Character"
 
 
-def mock_extract(chunk: str, resolver: EntityResolver) -> ExtractionResult:
+def mock_extract(chunk: str, resolver: EntityResolver, linker=None) -> ExtractionResult:
     nodes: dict[str, ExtractedNode] = {}
     edges: list[ExtractedEdge] = []
 
@@ -177,10 +185,26 @@ def mock_extract(chunk: str, resolver: EntityResolver) -> ExtractionResult:
                 a, b = ensure(m.group(1)), ensure(m.group(2))
                 if a and b and a != b:
                     edges.append(ExtractedEdge(kind=kind, source=a, target=b, **extra))  # type: ignore[arg-type]
+    if linker is not None:  # the campaign's own catalogue: creatures and treasures by name, peoples by "X, a Mirefolk"
+        for name, node_type in linker.mentions(chunk):
+            hit = resolver.resolve(name)
+            canonical = resolver.names.get(hit, name) if hit else name
+            known = nodes.get(canonical)  # a pattern may have guessed it was a person: the catalogue knows better
+            nodes[canonical] = (known.model_copy(update={"type": node_type}) if known
+                                else ExtractedNode(name=canonical, type=node_type))  # type: ignore[arg-type]
+        for person, species in linker.peoples(chunk):
+            who = ensure(person)
+            if who:
+                node = nodes.get(who) or ExtractedNode(name=who, type="Character")
+                nodes[who] = node.model_copy(update={"species": species})
     return ExtractionResult(nodes=list(nodes.values()), edges=edges)
 
 
-def extract(chunk: str, resolver: EntityResolver) -> ExtractionResult:
+def extract(chunk: str, resolver: EntityResolver, linker=None) -> ExtractionResult:
+    """Extract a chunk. ``linker`` (an ``ingestion.catalogue_link.CatalogueLinker``) adds the campaign's own
+    catalogue: hints for the model, or name and people scans in mock mode."""
     if get_settings().mock_llm:
-        return mock_extract(chunk, resolver)  # works from the text alone, so nothing to ground
-    return ground(llm_extract(chunk, relevant_names(chunk, resolver)), chunk, resolver)
+        return mock_extract(chunk, resolver, linker)  # works from the text alone, so nothing to ground
+    hints = linker.hints(chunk) if linker is not None else None
+    names = relevant_names(chunk, resolver)
+    return ground(llm_extract(chunk, names, hints) if hints else llm_extract(chunk, names), chunk, resolver)

@@ -37,7 +37,8 @@ backend/
             mutations.py (Mutator: applies WorldEventDrafts as docs), runs.py (run registry on disk, SSE),
             strength.py (battle strength from challenge ratings: Forces.side/lair/contest)
   llm/      client.py (OpenAI-compatible structured client), mock.py (deterministic stand-ins for every call)
-  ingestion/ markdown (Obsidian), documents (pypdf/docling), audio (whisper), extract.py (LLM -> graph), resolution
+  ingestion/ markdown (Obsidian), documents (pypdf/docling), audio (whisper), extract.py (LLM -> graph), resolution,
+            catalogue_link.py (mentions -> SRD/homebrew srd_ref, challenge, species)
   atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet),
             service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
@@ -162,7 +163,7 @@ target, or once it's held (`capped_goal_progress`): off-screen ticks stop one se
 
 ```bash
 docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
-cd backend && python -m pytest -q               # 106 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
+cd backend && python -m pytest -q               # 113 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
 ```
@@ -228,7 +229,8 @@ Real model: forecasts run end to end on the GPU PC (`qwen3.8:27b-24k`, flash att
 (a live run resumed twice), #24 (arbiter context; grouped arbiter calls), #30 (goal clocks handing over lost
 conquests), #31 (diplomacy timed as army marches).
 
-Backlog: homebrew in the session-notes extractor; epic: native world generation instead of Azgaar.
+Backlog: epic: native world generation instead of Azgaar.
 Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings;
 "Open in VTT" from the briefing (`place` on each event/rumor, `to-table` with `mark_visited: false`); LLM-written
-wizard prose (`wizard/prose.py`); globe labels as symbol layers with bundled glyphs (`frontend/public/fonts`).
+wizard prose (`wizard/prose.py`); globe labels as symbol layers with bundled glyphs (`frontend/public/fonts`); ingestion links to the catalogue
+(`ingestion/catalogue_link.py`: SRD + homebrew `srd_ref`, challenge/threat, species).
