@@ -50,7 +50,8 @@ frontend/src/ App.tsx, api.ts (all types + calls), ui.tsx, views/{Forecaster,Bri
 vtt/        backend/app/{main.py (routes + /ws), state.py (TableService: table state, fog, view, tokens, scene,
             session log), tokens.py, db.py (SQLite), hub.py (WS fan-out by role), pipeline/ (jobs, flows, comfy, llm)}
             frontend/src/{table/TablePage.tsx, dm/*.tsx panels, components/*Layer|Canvas, lib/sync.ts (WS state)}
-scripts/    seed_demo_world.py, import_azgaar.py, build_srd_catalogue.py, llm_smoke.py (real-model check)
+scripts/    seed_demo_world.py, import_azgaar.py, build_srd_catalogue.py, llm_smoke.py (each LLM call once),
+            forecast_check.py (a whole forecast on the real model, timed per step and per call type)
 docs/       azgaar-field-guide.md (how to make/export an Azgaar world)
 ```
 
@@ -182,7 +183,8 @@ travel times (roads, sea, SRD paces) in forecasts and atlas, zoom-in maps of any
 
 Real-model fixes from the first GPU run are merged and their issues closed (#12 max tokens, #13 extraction echoing
 known entities, #14 SDK retries, #15 reasoning effort, #16 docs). Next: a full forecast on the real model
-(`qwen3.8:27b-16k`), now that a long run can survive a restart.
+(`qwen3.8:27b-16k`) with `scripts/forecast_check.py` on the GPU PC, then fix what it shows (slow or failing call
+types, empty or odd outcomes).
 
 Backlog: real map labels on the globe (needs bundled fonts/glyphs), battle strength from SRD challenge ratings,
 "Open in VTT" from the briefing, LLM-written
