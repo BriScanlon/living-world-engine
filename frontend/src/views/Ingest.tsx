@@ -108,6 +108,7 @@ export default function Ingest({ branches, health, onChanged }: { branches: Bran
                   <Badge>{r.chunks} chunks</Badge>
                   <Badge tone="green">+{r.created.length} nodes</Badge>
                   <Badge tone="blue">+{r.edges} edges</Badge>
+                  {!!r.catalogue_links && <Badge tone="slate" title="Creatures, treasures and peoples linked to the SRD or your homebrew">{r.catalogue_links} linked to the catalogue</Badge>}
                   <Badge tone="slate">day {r.in_world_day}</Badge>
                 </div>
                 {!!r.created.length && <div className="mt-2 text-xs text-ink-300">New: {r.created.map((c) => c.name).join(", ")}</div>}

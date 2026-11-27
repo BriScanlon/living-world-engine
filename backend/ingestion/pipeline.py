@@ -18,6 +18,7 @@ from graph.schema import slugify
 from graph.store import GraphStore, get_store
 from graph.world import WorldView
 from ingestion import audio, documents
+from ingestion.catalogue_link import CatalogueLinker
 from ingestion.extract import ExtractedEdge, extract, guess_type
 from ingestion.markdown import chunk_markdown, parse_markdown, strip_wikilinks
 from ingestion.resolution import EntityResolver
@@ -64,6 +65,7 @@ class GraphBuilder:
         self.created: list[str] = []
         self.merged: list[dict[str, str]] = []
         self.edges = 0
+        self.linked = 0  # nodes given catalogue fields (srd_ref, challenge, species...)
 
     def cur(self, i: str) -> dict[str, Any] | None:
         return self.pending.get(i) or self.w.all.get(i)
@@ -178,7 +180,35 @@ def _text_for(src: Source) -> tuple[str, str]:
 
 
 def ingest_source(store: GraphStore, src: Source, branch: str, day: int | None) -> dict[str, Any]:
+    """Ingest one source inside the campaign's catalogue layer (SRD + its homebrew), so what the notes mention is
+    linked to catalogue entries (``ingestion.catalogue_link``)."""
+    from srd import catalogue, homebrew
+    with catalogue.homebrew(homebrew.overlay_entries(store)):
+        return _ingest_source(store, src, branch, day)
+
+
+def _link(gb: "GraphBuilder", linker: CatalogueLinker, doc_id: str | None, names: list[str],
+          species: str | None = None) -> None:
+    """Add catalogue fields a node lacks: a Monster's or Item's srd_ref (+ challenge/threat, rarity), a character's
+    species (canonical when it is a catalogued people). Never overwrites what the node already has."""
+    d = gb.cur(doc_id) if doc_id else None
+    if not d:
+        return
+    extra: dict[str, Any] = {}
+    for n in [d.get("name"), *names, *d.get("aliases", [])]:
+        extra = linker.props_for(d["@type"], n, d) if n else {}
+        if extra:
+            break
+    if species and d["@type"] == "Character" and not d.get("species"):
+        extra["species"] = linker.species(species) or species
+    if extra:
+        gb.put({**d, **extra})
+        gb.linked += 1
+
+
+def _ingest_source(store: GraphStore, src: Source, branch: str, day: int | None) -> dict[str, Any]:
     world = WorldView.load(store, branch)
+    linker = CatalogueLinker()
     the_day = day if day is not None else world.max_day()
     text, converter = _text_for(src)
     note = parse_markdown(text, src.name) if src.kind in ("markdown", "text") else None
@@ -220,19 +250,24 @@ def ingest_source(store: GraphStore, src: Source, branch: str, day: int | None) 
 
     chunks = chunk_markdown(strip_wikilinks(body)) if body.strip() else []
     for chunk in chunks:
-        result = extract(chunk, gb.resolver)
+        result = extract(chunk, gb.resolver, linker)
         for n in result.nodes:
-            gb.node(n.name, n.type, aliases=n.aliases, description=n.description,
-                    props={k: v for k, v in {"role": n.role, "location_type": n.location_type}.items() if v})
+            nid = gb.node(n.name, n.type, aliases=n.aliases, description=n.description,
+                          props={k: v for k, v in {"role": n.role, "location_type": n.location_type}.items() if v})
+            _link(gb, linker, nid, [n.name, *n.aliases], n.species)
         gb.apply_extracted(result.edges)
 
+    # anything else written from this source (a note's own entity, wikilinked stubs) gets linked too
+    for d in list(gb.pending.values()):
+        if d.get("@type") in ("Monster", "Item") and not d.get("srd_ref"):
+            _link(gb, linker, d["@id"], [])
     docs = list(gb.pending.values())
     if docs:
         store.upsert(docs, branch, f"[ingest] {src.name}: +{len(gb.created)} nodes, +{gb.edges} edges"
                                    f"{', ' + str(len(gb.merged)) + ' aliases merged' if gb.merged else ''}")
     return {"source": src.name, "converter": converter, "chunks": len(chunks), "documents_written": len(docs),
             "created": [{"id": i, "name": (gb.cur(i) or {}).get("name")} for i in gb.created],
-            "aliases_merged": gb.merged, "edges": gb.edges, "in_world_day": the_day}
+            "aliases_merged": gb.merged, "edges": gb.edges, "catalogue_links": gb.linked, "in_world_day": the_day}
 
 
 def _first_paragraph(body: str) -> str | None:

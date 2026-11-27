@@ -215,6 +215,7 @@ export interface IngestJob {
     created: Ref[];
     aliases_merged: { surface: string; canonical: string }[];
     edges: number;
+    catalogue_links?: number;
     in_world_day: number;
   }[];
   error: string | null;

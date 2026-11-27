@@ -136,6 +136,7 @@ until they investigate; rumors spread `BELIEVES` edges to locals.
 | Session notes / audio | text, or `faster-whisper` transcript; facts stamped with the in-world day |
 | Extraction | LLM → `{nodes, edges}` (incl. inferred WANTS/NEEDS and KNOWS). Mock mode uses pattern heuristics ("X fears Y", "X owes Y"…) |
 | Entity resolution | alias table + honorific stripping + `rapidfuzz` — "The Baron", "Lord Vane", "Baron Vane" → `Character/lord-aldric-vane`; new surface forms are saved as `Alias` docs |
+| Catalogue links | inside the campaign's homebrew layer: a creature or treasure that matches an SRD or **homebrew** entry gets its `srd_ref` (a creature also its challenge rating and threat, so it counts in battle strength), and a character's people becomes its `species` ("Ysolde, a Mirefolk smuggler", "two Marsh Wights", "the trolls" all match; homebrew wins over the SRD). The model is told which homebrew names the passage uses; mock mode finds them by name |
 
 Each file is one commit. Ingest into a scratch branch (e.g. `ingest-session-15`), review it in
 Branches / Time Travel, then merge.
