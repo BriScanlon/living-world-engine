@@ -155,6 +155,9 @@ A compiled LangGraph `StateGraph`:
 5. **`world_arbiter`** — resolves simultaneous intents (contests by resources/influence, fighting
    strength, relationships), emits `WorldEvent`s with relationship shifts, control changes, goal progress,
    new goals/fears, deaths, and knowledge gained; completed goal clocks fire consequences.
+   A clock whose goal takes a place or an item (conquest, seizure, theft) stops one segment short until its
+   owner actually wins the target: time and failed attempts bring it to the brink, only a victory finishes it,
+   so a goal never hands over what the arbiter ruled lost (or what an army hasn't yet reached).
 
    **Battle strength.** Attacks, seizures, thefts and sabotage weigh who actually fights
    (`simulation/strength.py`). Each side's people and creatures get a challenge rating from their own

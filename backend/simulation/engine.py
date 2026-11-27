@@ -329,6 +329,49 @@ def run_agent_turns(state: SimState, config) -> dict[str, Any]:
             "_data": {"intents": [f"{i['agent_name']}: {i['action']} → {i['target_name'] or '—'}" for i in intents]}}
 
 
+# ---------------------------------------------------------------- arbiter consequences: who holds what
+def side_of(world: WorldView, agent_id: str | None) -> str | None:
+    """The side an agent fights and holds for: a character's faction, a faction itself, else the agent."""
+    d = world.get(agent_id) or {}
+    return (d.get("faction") or agent_id) if d.get("@type") == "Character" else agent_id
+
+
+def holder(m: Mutator, target: str, day: int) -> str | None:
+    """Who controls (else owns) ``target`` on ``day``, counting changes made earlier in this round."""
+    edges = m._active("ControlEdge", day, lambda d: d["target_id"] == target)
+    best = next((e for e in edges if e["kind"] == "CONTROLS"), None) or next(iter(edges), None)
+    return best["from_id"] if best else None
+
+
+def takes_control(goal: dict[str, Any]) -> bool:
+    """A goal whose completion hands its owner a place or an item (conquest, seizure, theft)."""
+    return str(goal.get("target") or "").startswith(("Location/", "Province/", "Item/"))
+
+
+def wins_target(world: WorldView, draft: WorldEventDraft, owner: str, target: str) -> bool:
+    """Does this event itself hand ``target`` to ``owner``'s side?"""
+    return any(cc.target_id == target and side_of(world, cc.new_controller_id) == side_of(world, owner)
+               for cc in draft.control_changes)
+
+
+def capped_goal_progress(world: WorldView, m: Mutator, draft: WorldEventDraft) -> dict[str, int]:
+    """The goal progress an event may really add (#30). A goal that takes a place or item can only be *finished* by
+    an event that wins its owner the target, or once the owner's side already holds it. Off-screen ticks and
+    progress from events that didn't win stop one segment short, so a clock never hands over a conquest the
+    arbiter ruled lost, or one whose army has not yet arrived."""
+    out: dict[str, int] = {}
+    for gid, amount in draft.goal_progress.items():
+        g = m.cur(gid)
+        if g and amount > 0 and g.get("status") == "active" and takes_control(g):
+            tgt = g["target"]
+            owned = side_of(world, holder(m, tgt, draft.day)) == side_of(world, g["owner"])
+            if not owned and not wins_target(world, draft, g["owner"], tgt):
+                amount = min(amount, max(0, g["clock_segments"] - 1 - g["clock_progress"]))
+        if amount > 0:
+            out[gid] = amount
+    return out
+
+
 @node("world_arbiter")
 def world_arbiter(state: SimState, config) -> dict[str, Any]:
     c = _ctx(config)
@@ -392,6 +435,9 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
     reports = []
     known_events = {e["@id"] for e in world.of_type("Event")}
     for i, d in enumerate(drafts):
+        d.goal_progress = capped_goal_progress(world, m, d)
+        if d.event_type == "goal_progress" and not d.goal_progress and i >= len(result.events):
+            continue  # an off-screen tick with nothing left to add: the last step needs a victory
         rep = m.apply_event(d, i, caused_by_ok=known_events)
         reports.append({**rep, "round": r, "day": d.day, "summary": d.summary, "event_type": d.event_type,
                         "visibility": d.visibility, "caused_by": d.caused_by, "actors": d.actor_ids,
@@ -405,9 +451,12 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
             tgt = g.get("target")
             cc = []
             shifts = []
-            if tgt and tgt.startswith(("Location/", "Province/", "Item/")):
-                cc = [ControlChange(target_id=tgt, new_controller_id=g["owner"],
-                                    kind="OWNS" if tgt.startswith("Item/") else "CONTROLS")]
+            if takes_control(g):
+                # Finished only by a win or with the target already held (capped_goal_progress): hand it over
+                # unless the winning event already did
+                if side_of(world, holder(m, tgt, rep["day"])) != side_of(world, g["owner"]):
+                    cc = [ControlChange(target_id=tgt, new_controller_id=g["owner"],
+                                        kind="OWNS" if tgt.startswith("Item/") else "CONTROLS")]
             elif tgt and tgt.startswith(AGENTISH):
                 shifts = [RelationshipShift(from_id=tgt, to_id=g["owner"], delta=-25, reason=g["name"])]
             fin = WorldEventDraft(
