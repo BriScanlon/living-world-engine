@@ -99,6 +99,11 @@ finished node plus the next node (`node()` wrapper writes it; `ADDITIVE` keys ar
 reducers). On start-up, `queued`/`running` runs become `interrupted`. `resume_forecast(id)` (`POST
 /api/forecasts/{id}/resume`) restarts the graph at the checkpoint's next node through a conditional START edge
 (`resume_at`), on the run's own campaign. Re-running a cut-off node is safe because writes use deterministic ids.
+Several processes share the run files (backend, `forecast_check.py` via `docker compose exec`), so runs have an
+`owner` (host, pid, boot nonce) and a `heartbeat_at` refreshed every 15 s by a thread while running: a process never
+writes to another live process's run, re-reads it from disk when looked at, and marks it `interrupted` only after
+90 s without a heartbeat. `registry.claim()` (lock file) takes a run over before resuming; `RunBusy` -> HTTP 409.
+Branch controls (merge, cherry-pick, discard, re-run) refuse a branch with an active run (`_not_while_running`).
 A new node must be added to `NEXT`/`_next_node`, or resumes will route wrongly. Travel: an actor acting on a far place arrives `lo + travel days` (army pace for factions in
 conflict/faction_move; summary gets "(A journey of N days.)"); rumors land at `event day + news travel days`, and
 locals believe from then. Events/rumors may land after the window (future-dated); out-of-window events spawn no

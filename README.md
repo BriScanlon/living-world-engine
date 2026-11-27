@@ -227,7 +227,10 @@ the contested magic item. See [backend/srd/README.md](backend/srd/README.md).
 * **Unfinished forecasts** — runs are kept on disk, so a forecast survives a backend restart: one cut off by a
   restart shows as *interrupted* (one stopped by an error, such as a model timeout, as *failed*) and **▶ Resume**
   continues it after its last finished step, on the same branch. Real models make forecasts take minutes, so this
-  matters once `MOCK_LLM=false`.
+  matters once `MOCK_LLM=false`. A forecast another process is running (such as `scripts/forecast_check.py`) shows
+  as *running elsewhere* with **Watch** instead: each run has an owner and a heartbeat, and only a run whose process
+  has gone quiet (no heartbeat for 90 s) can be resumed. Merge, cherry-pick, discard and re-run refuse a branch whose
+  forecast is still running.
 * **Time Travel** — any branch × any in-world day × any commit; force-directed graph,
   click an agent to see exactly what its prompt would contain.
 
