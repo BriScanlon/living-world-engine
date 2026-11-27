@@ -329,7 +329,13 @@ def run_agent_turns(state: SimState, config) -> dict[str, Any]:
             "_data": {"intents": [f"{i['agent_name']}: {i['action']} → {i['target_name'] or '—'}" for i in intents]}}
 
 
-# ---------------------------------------------------------------- arbiter consequences: who holds what
+# ---------------------------------------------------------------- arbiter consequences: who holds what, who travels how
+# Faction actions that move an army; at home a faction needs no journey; everything else a faction does far away
+# (envoys, ultimatums, agents and spies) goes by rider.
+ARMY_ACTIONS = {"attack", "seize"}
+HOME_ACTIONS = {"fortify", "recruit", "trade", "observe", "investigate", "negotiate", "ally", "threaten", "bribe"}
+
+
 def side_of(world: WorldView, agent_id: str | None) -> str | None:
     """The side an agent fights and holds for: a character's faction, a faction itself, else the agent."""
     d = world.get(agent_id) or {}
@@ -370,6 +376,25 @@ def capped_goal_progress(world: WorldView, m: Mutator, draft: WorldEventDraft) -
         if amount > 0:
             out[gid] = amount
     return out
+
+
+def journey_pace(world: WorldView, draft: WorldEventDraft, action: str | None, dest: str | None) -> str | None:
+    """How an event's actor gets to ``dest`` (#31): ``army``, ``horse``, ``foot``, or None for no journey.
+
+    Chosen from the intent's **action**, not the event type (a real model labels a negotiation ``faction_move`` as
+    happily as a march). People walk. A faction marches only to attack or seize, or to fortify away from home; at
+    home it needs no journey; otherwise its envoys, agents and spies ride."""
+    actor = world.get(draft.actor_ids[0]) or {}
+    if actor.get("@type") != "Faction":
+        return "foot"
+    if action is None:  # no intent behind it (or the model didn't say): judge by the event type
+        return "army" if draft.event_type == "conflict" else "horse"
+    at_home = bool(dest) and side_of(world, world.controller_of(dest)) == actor["@id"]
+    if action in ARMY_ACTIONS:
+        return "army"
+    if at_home and action in HOME_ACTIONS:
+        return None
+    return "army" if action == "fortify" else "horse"
 
 
 @node("world_arbiter")
@@ -417,19 +442,21 @@ def world_arbiter(state: SimState, config) -> dict[str, Any]:
     for i, d in enumerate(drafts):
         d.day = min(hi, max(lo + 1, lo + 1 + (i * span) // max(1, len(drafts))))
     # Nobody acts on a far-off place before they could get there: set out at the round's start, arrive, then act.
-    # Factions on the move march at army pace; everyone else walks. Late arrivals land after this round.
+    # The pace comes from what the actor set out to do (journey_pace). Late arrivals land after this round.
     trav = travel.for_world(world)
+    action_of = {i["agent_id"]: i.get("action") for i in intents}
     journeys: dict[int, dict[str, Any]] = {}
     for i, d in enumerate(drafts):
         if d.event_type in ("goal_progress", "goal_achieved") or not d.actor_ids:
             continue
         dest = d.location_id if world.get(d.location_id) else next((t for t in d.target_ids if world.get(t)), None)
-        actor = world.get(d.actor_ids[0]) or {}
-        pace = "army" if actor.get("@type") == "Faction" and d.event_type in ("conflict", "faction_move") else "foot"
-        days = trav.days(d.actor_ids[0], dest, pace) if dest else 0
+        action = next((action_of[a] for a in [*d.from_intents, d.actor_ids[0]] if a in action_of), None)
+        pace = journey_pace(world, d, action, dest)
+        days = trav.days(d.actor_ids[0], dest, pace) if dest and pace else 0
         if days and lo + days > d.day:
             d.day = lo + days
-            d.summary = f"{d.summary.rstrip()} ({'A march' if pace == 'army' else 'A journey'} of {days} day{'s' if days != 1 else ''}.)"
+            what = {"army": "A march", "horse": "A ride"}.get(pace, "A journey")
+            d.summary = f"{d.summary.rstrip()} ({what} of {days} day{'s' if days != 1 else ''}.)"
             journeys[i] = {"days": days, "pace": pace}
     m = Mutator(world, state["session_label"], (state["seed"], "round", r))
     reports = []

@@ -1,10 +1,11 @@
-"""What the arbiter's events may change: goal clocks can't hand over what wasn't won (#30)."""
+"""What the arbiter's events may change: goal clocks can't hand over what wasn't won (#30), and a faction's envoys
+ride while only its armies march (#31)."""
 import uuid
 
 import pytest
 from graph import builders as b
 from graph.world import WorldView
-from simulation.engine import capped_goal_progress, side_of
+from simulation.engine import capped_goal_progress, journey_pace, side_of
 from simulation.models import ControlChange, WorldEventDraft
 from simulation.mutations import Mutator
 
@@ -69,6 +70,32 @@ def test_side_of():
     assert side_of(w, ids["General Vash"]) == ids["Torori Empire"]
     assert side_of(w, ids["Torori Empire"]) == ids["Torori Empire"]
     assert side_of(w, None) is None
+
+
+# ------------------------------------------------------------------------------------------------ #31 journey pace
+@pytest.mark.parametrize("action,event_type,dest,pace", [
+    ("negotiate", "faction_move", "Principality of Ithion", "horse"),  # envoys ride, whatever the model calls it
+    ("threaten", "conflict", "Principality of Ithion", "horse"),       # an ultimatum is a letter, not a march
+    ("ally", "faction_move", "Principality of Ithion", "horse"),
+    ("investigate", "npc_action", "Elivel Keep", "horse"),             # spies ride
+    ("attack", "npc_action", "Elivel Keep", "army"),                   # only armies march
+    ("seize", "faction_move", "Elivel Keep", "army"),
+    ("fortify", "faction_move", "Elivel Keep", "army"),                # fortifying abroad moves troops
+    ("fortify", "faction_move", "Torori Hold", None),                  # at home: no journey at all
+    ("negotiate", "faction_move", "Torori Hold", None),
+    (None, "faction_move", "Elivel Keep", "horse"),                    # no intent: only a conflict marches
+    (None, "conflict", "Elivel Keep", "army"),
+])
+def test_a_faction_marches_only_to_fight(action, event_type, dest, pace):
+    w, ids = _world()
+    d = _draft(ids["Torori Empire"], target=ids[dest], event_type=event_type)
+    assert journey_pace(w, d, action, ids[dest]) == pace
+
+
+def test_people_walk():
+    w, ids = _world()
+    d = _draft(ids["General Vash"], target=ids["Elivel Keep"], event_type="conflict")
+    assert journey_pace(w, d, "attack", ids["Elivel Keep"]) == "foot"
 
 
 # ------------------------------------------------------------------------------------------------ whole forecasts

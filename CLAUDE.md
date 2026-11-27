@@ -112,8 +112,9 @@ Several processes share the run files (backend, `forecast_check.py` via `docker 
 writes to another live process's run, re-reads it from disk when looked at, and marks it `interrupted` only after
 90 s without a heartbeat. `registry.claim()` (lock file) takes a run over before resuming; `RunBusy` -> HTTP 409.
 Branch controls (merge, cherry-pick, discard, re-run) refuse a branch with an active run (`_not_while_running`).
-A new node must be added to `NEXT`/`_next_node`, or resumes will route wrongly. Travel: an actor acting on a far place arrives `lo + travel days` (army pace for factions in
-conflict/faction_move; summary gets "(A journey of N days.)"); rumors land at `event day + news travel days`, and
+A new node must be added to `NEXT`/`_next_node`, or resumes will route wrongly. Travel: an actor acting on a far place arrives `lo + travel days` (`journey_pace`: chosen
+from the intent's action, not the event type: people walk, factions march only to attack/seize/fortify abroad,
+ride otherwise, and need no journey at home; summary gets "(A march|ride|journey of N days.)"); rumors land at `event day + news travel days`, and
 locals believe from then. Events/rumors may land after the window (future-dated); out-of-window events spawn no
 rumors. Goals that take a place or item (`takes_control`) are finished only by an event that wins the owner the
 target, or once it's held (`capped_goal_progress`): off-screen ticks stop one segment short.

@@ -292,7 +292,10 @@ Distance now matters in the world:
 * **Paces** follow the SRD's overland travel: 24 miles a day on foot, 30 on horseback, 12 for an army, news at 30 with
   riders and merchants; ships make 48 miles a day.
 * **In forecasts**, an actor acting on a far-off place sets out at the start of the round and acts on arrival
-  (factions on the move march at army pace); the event's summary says how long it took, and late arrivals land after
+  at the pace of what it set out to do: people walk; a faction's armies march (attack, seize, fortify abroad), its
+  envoys, agents and spies ride (negotiate, threaten, ally, investigate…), and at home it needs no journey. The
+  pace comes from the intent, not the event type a model gave it. The event's summary says how long it took (*A
+  march / A ride / A journey of N days*), and late arrivals land after
   the round. Rumors reach a far tavern only once news could get there, and the locals believe them from that day.
 * **In the atlas**, each place shows how far it is from where the party is (on foot, horseback, for an army, and how
   long news takes), and the route is drawn on the globe. `GET /api/travel?a=&b=` gives the same between any two
