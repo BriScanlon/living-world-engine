@@ -39,9 +39,9 @@ TITLES = {"Kingdom": ("King", "Queen"), "Duchy": ("Duke", "Duchess"), "Republic"
           "Principality": ("Prince", "Princess")}
 MAX_WILDS = 60  # wilds with monsters per world (keeps a large region inside the ~1,500-document budget)
 # Generated worlds are a campaign region on the globe (issue #38): extent in km, km per cell, town budget
-REGION_SIZES = {"small": {"region_km": (1500, 1000), "cell_km": 18.0, "max_towns": 100},
-                "medium": {"region_km": (2500, 1600), "cell_km": 20.0, "max_towns": 200},
-                "large": {"region_km": (4000, 2500), "cell_km": 24.0, "max_towns": 320}}
+REGION_SIZES = {"small": {"region_km": (1500, 1000), "cell_km": 18.0, "max_towns": 100, "mesh": "voronoi"},
+                "medium": {"region_km": (2500, 1600), "cell_km": 20.0, "max_towns": 200, "mesh": "voronoi"},
+                "large": {"region_km": (4000, 2500), "cell_km": 24.0, "max_towns": 320, "mesh": "voronoi"}}
 
 
 # =========================================================================== jobs

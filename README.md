@@ -228,6 +228,12 @@ is commonly known, because agents read the descriptions of what they know. Anyth
 fails, keeps its template: a world always builds. On qwen3.8:27b (7900 XT) a small world's 57 descriptions take
 about a minute and a half. Mock mode leaves the templates alone.
 
+**Terrain.** Generated regions use the native generator (`backend/atlas/worldgen/`, epic #45): a Voronoi mesh
+(~11,500 cells for a medium region) and a heightmap whose mountain ranges follow tectonic-plate boundaries, with
+coasts drawn by fractal noise. *Continents* gives two or three landmasses with open sea between them, *pangea* one
+great landmass, *islands* and *archipelago* many islands; land share follows the shape. A medium region generates
+in about half a second.
+
 **Scale.** A generated world is a region, not a planet: provinces of about 20,000 km² (10–40k), towns 45–65 km
 apart (a day or two on foot), highways between neighbouring capitals (one to three weeks), up to 100 / 200 / 320
 towns and 60 wilds, so even a large region stays within about 1,500 graph documents. The rest of the globe is sea

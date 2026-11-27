@@ -86,13 +86,16 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
              hostility: str = "uneasy", culture_names: list[str] | None = None,
              religion_names: list[tuple[str, str]] | None = None,
              region_km: tuple[float, float] | None = None, cell_km: float = 20.0,
-             max_towns: int = 200) -> dict[str, Any]:
+             max_towns: int = 200, mesh: str = "hex") -> dict[str, Any]:
     """A world in Azgaar Full JSON shape.
 
     Planet mode (default): the hex grid spans most of an Earth-sized planet (the demo and the tests).
     Region mode (``region_km=(width, height)``): a campaign region of that size in km, ``cell_km`` per cell, placed at
     a latitude that fits ``climate``; provinces about ``PROVINCE_KM2``, towns at least ``TOWN_SPACING_KM`` apart (up
-    to ``max_towns``), so journeys take days to weeks instead of months to years."""
+    to ``max_towns``), so journeys take days to weeks instead of months to years.
+
+    ``mesh="voronoi"`` (the wizard's regions) builds cells and terrain with ``atlas.worldgen`` (Voronoi mesh, fBm
+    heightmap with mountain chains, cleaned coasts) instead of the hex grid and blob heightmap."""
     rng = random.Random(seed)
     region = region_km is not None
     km_px = 0.0
@@ -109,62 +112,79 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     while len(religion_list) < n_religions:
         religion_list = religion_list + [(f"Cult of {_name(rng, len(religion_list), 2)}", "Cult")]
 
-    # ------------------------------------------------------------------ hex mesh
-    w = math.sqrt(3) * radius
-    rows = int((height - radius) // (1.5 * radius))
-    cols = int((width - w / 2) // w)
-    centers: list[tuple[float, float]] = []
-    for r in range(rows):
-        for c in range(cols):
-            centers.append((round(c * w + (r % 2) * w / 2 + w / 2, 2), round(r * 1.5 * radius + radius, 2)))
-    vkey: dict[tuple[float, float], int] = {}
-    vpos: list[list[float]] = []
-    vcells: list[list[int]] = []
-    cell_v: list[list[int]] = []
-    for i, (cx, cy) in enumerate(centers):
-        ring = []
-        for k in range(6):
-            a = math.radians(-90 + 60 * k)
-            pt = (round(cx + radius * math.cos(a), 1), round(cy + radius * math.sin(a), 1))
-            if pt not in vkey:
-                vkey[pt] = len(vpos)
-                vpos.append([pt[0], pt[1]])
-                vcells.append([])
-            vid = vkey[pt]
-            vcells[vid].append(i)
-            ring.append(vid)
-        cell_v.append(ring)
-    nbrs: list[list[int]] = []
-    for i, ring in enumerate(cell_v):
-        count: dict[int, int] = {}
-        for v in ring:
-            for j in vcells[v]:
-                if j != i:
-                    count[j] = count.get(j, 0) + 1
-        nbrs.append(sorted(j for j, k in count.items() if k >= 2))
-    n = len(centers)
+    if mesh == "voronoi":
+        import numpy as np
 
-    # ------------------------------------------------------------------ heightmap
-    blobs = [(rng.uniform(0.08, 0.92) * width, rng.uniform(0.2, 0.8) * height,
-              rng.uniform(*blob_r) * width, rng.uniform(0.7, 1.0)) for _ in range(n_blobs)]
-    grid = [[rng.random() for _ in range(17)] for _ in range(9)]
+        from atlas.worldgen import mesh as wg_mesh
+        from atlas.worldgen import terrain as wg_terrain
+        nrng = np.random.default_rng(seed)
+        spacing = cell_km / km_px if region else math.sqrt(3) * radius
+        m = wg_mesh.voronoi(width, height, spacing, nrng)
+        centers, cell_v, vpos, vcells, nbrs = m.centers, m.cell_v, m.vpos, m.vcells, m.nbrs
+        n = len(centers)
+    else:
+        # ------------------------------------------------------------------ hex mesh
+        w = math.sqrt(3) * radius
+        rows = int((height - radius) // (1.5 * radius))
+        cols = int((width - w / 2) // w)
+        centers: list[tuple[float, float]] = []
+        for r in range(rows):
+            for c in range(cols):
+                centers.append((round(c * w + (r % 2) * w / 2 + w / 2, 2), round(r * 1.5 * radius + radius, 2)))
+        vkey: dict[tuple[float, float], int] = {}
+        vpos: list[list[float]] = []
+        vcells: list[list[int]] = []
+        cell_v: list[list[int]] = []
+        for i, (cx, cy) in enumerate(centers):
+            ring = []
+            for k in range(6):
+                a = math.radians(-90 + 60 * k)
+                pt = (round(cx + radius * math.cos(a), 1), round(cy + radius * math.sin(a), 1))
+                if pt not in vkey:
+                    vkey[pt] = len(vpos)
+                    vpos.append([pt[0], pt[1]])
+                    vcells.append([])
+                vid = vkey[pt]
+                vcells[vid].append(i)
+                ring.append(vid)
+            cell_v.append(ring)
+        nbrs: list[list[int]] = []
+        for i, ring in enumerate(cell_v):
+            count: dict[int, int] = {}
+            for v in ring:
+                for j in vcells[v]:
+                    if j != i:
+                        count[j] = count.get(j, 0) + 1
+            nbrs.append(sorted(j for j, k in count.items() if k >= 2))
+        n = len(centers)
+
+    if mesh != "voronoi":  # hex: the blobs are drawn first, as they always were (same planet for the same seed)
+        blobs = [(rng.uniform(0.08, 0.92) * width, rng.uniform(0.2, 0.8) * height,
+                  rng.uniform(*blob_r) * width, rng.uniform(0.7, 1.0)) for _ in range(n_blobs)]
+    grid = [[rng.random() for _ in range(17)] for _ in range(9)]  # smooth noise for moisture (and hex heights)
 
     def noise(x: float, y: float) -> float:
         gx, gy = x / width * 16, y / height * 8
-        x0, y0 = int(gx), int(gy)
+        x0, y0 = min(int(gx), 15), min(int(gy), 7)
         fx, fy = gx - x0, gy - y0
         a, b = grid[y0][x0], grid[y0][x0 + 1]
         c, d = grid[y0 + 1][x0], grid[y0 + 1][x0 + 1]
         return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
 
-    raw = []
-    for (x, y) in centers:
-        v = sum(amp * math.exp(-(((x - bx) ** 2 + (y - by) ** 2) / (rad ** 2))) for bx, by, rad, amp in blobs)
-        v += 0.45 * noise(x, y) - 0.1 * abs(y / height - 0.5)
-        raw.append(v)
-    thr = sorted(raw)[int(n * sea_share)]
-    lo, hi = min(raw), max(raw)
-    h = [int(20 + (v - thr) / (hi - thr) * 80) if v >= thr else int(19 * (v - lo) / (thr - lo)) for v in raw]
+    if mesh == "voronoi":
+        h = wg_terrain.heightmap(centers, nbrs, width, height, nrng, n_blobs=n_blobs, blob_r=blob_r,
+                                 sea_share=sea_share, shape=land,
+                                 edge_falloff=0.15 if land in ("continents", "pangea", "old-world") else 0.45)
+    else:
+        # ------------------------------------------------------------------ heightmap
+        raw = []
+        for (x, y) in centers:
+            v = sum(amp * math.exp(-(((x - bx) ** 2 + (y - by) ** 2) / (rad ** 2))) for bx, by, rad, amp in blobs)
+            v += 0.45 * noise(x, y) - 0.1 * abs(y / height - 0.5)
+            raw.append(v)
+        thr = sorted(raw)[int(n * sea_share)]
+        lo, hi = min(raw), max(raw)
+        h = [int(20 + (v - thr) / (hi - thr) * 80) if v >= thr else int(19 * (v - lo) / (thr - lo)) for v in raw]
     land = [x >= 20 for x in h]
 
     # ------------------------------------------------------------------ biomes
@@ -431,7 +451,7 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     return {
         "info": {"version": "sample-1", "description": "Living World Engine "
                  + (f"sample region ({region_km[0]:.0f} x {region_km[1]:.0f} km)" if region else "sample planet")
-                 + " in Azgaar Full JSON shape",
+                 + " in Azgaar Full JSON shape", "mesh": mesh,
                  "mapName": name, "width": width, "height": height, "seed": str(seed)},
         "settings": {"mapName": name, "distanceUnit": "mi"},
         "mapCoordinates": coords,
