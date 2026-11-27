@@ -35,6 +35,9 @@ WorldEvents with their consequences: relationship_shifts (trust deltas), control
 who learn of it), new_goals / new_desires (motivation shifts), knowledge_gained.
 Use ONLY ids that appear in the input. Use the round's day for every event. Keep summaries to 1-2 sentences.
 Give each event the agent ids whose intents produced it (from_intents); one event per intent is usually enough.
+Contested intents come with "forces": each side's fighting strength from the challenge ratings of the people and
+creatures it can field there (a lair's creatures always defend it). Weigh strength heavily for attack, seize, steal and
+sabotage: a weak band does not overrun a troll's den, though cunning, spending and surprise can still turn a close one.
 visibility: public (everyone nearby sees), secret (only participants), leaked (secret but got out)."""
 
 REASONING_CHARS = 200  # an intent's reasoning as the arbiter sees it
@@ -140,7 +143,16 @@ def arbiter_user(intents: list[dict], world: WorldView, day: int) -> str:
                           "clock": f"{g['clock_progress']}/{g['clock_segments']}"}
                          for g in world.of_type("Goal") if g.get("status") == "active" and g["owner"] in involved],
     }
-    return _dump({"day": day, "intents": [brief_intent(i) for i in intents], "world": state})
+    from simulation.strength import Forces
+    forces = Forces(world)
+    contests = [c for c in (forces.contest(i, intents) for i in intents) if c]
+    for c in contests:  # the arbiter needs strengths and who fought, not XP sums
+        for side in ("attacker", "defender"):
+            c[side].pop("xp", None)
+    payload = {"day": day, "intents": [brief_intent(i) for i in intents], "world": state}
+    if contests:
+        payload["forces"] = contests
+    return _dump(payload)
 
 
 def rumor_user(events: list[dict], world: WorldView) -> str:
