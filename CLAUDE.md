@@ -125,7 +125,7 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
 - **Level of detail:** `party_map.closeness(places, proj)` = median town spacing / 40 base px; thresholds
   `SHOW_TOWN_NAMES` (0.75), `SHOW_TOWN_SYMBOLS` (0.5), `SHOW_PROVINCES`/`SHOW_BAYS` (0.6), `SHOW_LAKES` (0.75); terrain
   `density` = closeness clamped to 0.45-1 (`symbols.place(density=)`). Tiles: `parchment.terrain_density(z)`,
-  `TOWN_SYMBOLS_FROM` 7, cache path includes `VERSION` (bump it when the drawing changes). Atlas label `minzoom`s in
+  `TOWN_SYMBOLS_FROM` 8 (tile zooms run ~1 ahead of the globe's), cache path includes `VERSION` (bump it when the drawing changes). Atlas label `minzoom`s in
   `Atlas.tsx` (towns 6.5, cities 5, local 9, provinces 5, `label-water` 3, `label-water-small` 5.5).
 - **Party map styles** (#57): `party_map.STYLES` (`colour`, `ink`) are palettes for the world section; setting
   `party_map_style`; `render(..., style=)`, `to_table(..., style=)` tags the VTT map `lwe-style:<style>` and

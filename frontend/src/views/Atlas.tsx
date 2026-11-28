@@ -21,6 +21,12 @@ const EVENT_COLORS: [string, string][] = [
   ["goal_progress", "#7d8796"],
 ];
 
+/** Place markers by zoom, like their names: capitals and the campaign's own places always, cities from 5, the rest
+ * from 6.5 (#57: far out, only the main places). */
+const PLACE_OPACITY: any = ["step", ["zoom"],
+  ["case", ["any", ["==", ["get", "kind"], "capital"], ["get", "campaign"]], 1, 0], 5,
+  ["case", ["any", ["in", ["get", "kind"], ["literal", ["capital", "city"]]], ["get", "campaign"]], 1, 0], 6.5, 1];
+
 export default function Atlas({ branches }: { branches: Branch[] }) {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -123,14 +129,27 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     const parchment = look !== "data";
     if (parchment) {
       (map.getSource("parchment") as maplibregl.RasterTileSource).setTiles(
-        [`${location.origin}/api/atlas/parchment/${slug}/{z}/{x}/{y}.webp?style=${look === "ink" ? "ink" : "colour"}`]);
+        [`${location.origin}/api/atlas/parchment/${slug}/{z}/{x}/{y}.webp?style=${look === "ink" ? "ink" : "colour"}&v=${state?.atlas?.parchment ?? ""}`]);
     }
     map.setLayoutProperty("parchment", "visibility", parchment ? "visible" : "none");
     for (const id of ["biomes", "rivers", "roads", "sea-lanes"]) {  // drawn into the parchment instead
       if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", parchment ? "none" : "visible");
     }
-    if (map.getLayer("province-fill")) map.setPaintProperty("province-fill", "fill-opacity", parchment ? 0.22 : 0.5);
-    if (map.getLayer("province-line")) map.setPaintProperty("province-line", "line-opacity", parchment ? 0.35 : 0.7);
+    if (map.getLayer("province-fill")) {  // realm colours: faint on parchment, fainter still in ink
+      map.setPaintProperty("province-fill", "fill-opacity", look === "ink" ? 0.1 : parchment ? 0.22 : 0.5);
+    }
+    if (map.getLayer("province-line")) map.setLayoutProperty("province-line", "visibility", parchment ? "none" : "visible");
+    if (map.getLayer("places")) {  // the parchment draws castles at capitals: there a marker only needs to be clickable
+      map.setPaintProperty("places", "circle-color", parchment ? "#2a2018" : ["case", ["get", "campaign"], "#f0ad4e", "#e6eaf0"]);
+      map.setPaintProperty("places", "circle-stroke-color", parchment ? "#f1e8cf" : "#0d0f12");
+      map.setPaintProperty("places", "circle-radius", parchment ? ["match", ["get", "kind"], "capital", 6, "city", 3, 2.5]
+        : ["match", ["get", "kind"], "capital", 5, "city", 4, 3]);
+      const shown = parchment ? ["step", ["zoom"], ["case", ["==", ["get", "start"], true], 1, 0], 5, ["case",
+        ["==", ["get", "kind"], "capital"], 0, ["==", ["get", "kind"], "city"], 1, ["==", ["get", "start"], true], 1, 0], 6.5,
+        ["case", ["==", ["get", "kind"], "capital"], 0, 1]] : PLACE_OPACITY;
+      map.setPaintProperty("places", "circle-opacity", shown);
+      map.setPaintProperty("places", "circle-stroke-opacity", shown);
+    }
     // lettering: ink on paper, or light on the dark data map
     for (const l of map.getStyle().layers ?? []) {
       if (l.type !== "symbol" || !l.id.startsWith("label-") || l.id === "label-province") continue;
@@ -179,7 +198,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     // Parchment: the party map's drawn look as raster tiles (atlas/parchment.py); hidden until chosen
     map.addSource("parchment", {
       type: "raster", tileSize: 256, minzoom: 3, maxzoom: 11,
-      tiles: [`${location.origin}/api/atlas/parchment/${a.slug}/{z}/{x}/{y}.webp?style=colour`],
+      tiles: [`${location.origin}/api/atlas/parchment/${a.slug}/{z}/{x}/{y}.webp?style=colour&v=${a.parchment ?? ""}`],
     });
     map.addLayer({ id: "parchment", type: "raster", source: "parchment", minzoom: 3, layout: { visibility: "none" },
       paint: { "raster-fade-duration": 150 } });
@@ -238,7 +257,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     // once zoomed in a little; in the party view only the provinces the party knows are named
     map.addSource("province-labels", { type: "geojson", data: empty });
     map.addLayer({
-      id: "label-province", type: "symbol", source: "province-labels", minzoom: 5,
+      id: "label-province", type: "symbol", source: "province-labels", minzoom: 6,
       layout: {
         "text-field": ["upcase", ["get", "name"]], "text-font": ["Noto Sans Italic"], "text-size": 10,
         "text-letter-spacing": 0.15, "text-max-width": 8, "text-padding": 6, "symbol-sort-key": 10,
@@ -289,6 +308,8 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         "circle-radius": ["match", ["get", "kind"], "capital", 5, "city", 4, 3],
         "circle-color": ["case", ["get", "campaign"], "#f0ad4e", "#e6eaf0"],
         "circle-stroke-color": "#0d0f12", "circle-stroke-width": 1.2,
+        // markers appear as you zoom in, like their names: capitals and the campaign's own places always
+        "circle-opacity": PLACE_OPACITY, "circle-stroke-opacity": PLACE_OPACITY,
       },
     });
     map.addLayer({

@@ -87,4 +87,4 @@ def test_ink_tiles_have_no_colour(world):
 
 def test_far_out_tiles_are_sparser():
     from atlas.parchment import terrain_density
-    assert terrain_density(4) < terrain_density(6) < terrain_density(8) == 1.0
+    assert terrain_density(5) < terrain_density(7) < terrain_density(9) == 1.0

@@ -29,13 +29,15 @@ TILE = 512  # pixels served per tile (shown as 256 css px: crisp on high-density
 RENDER = 2  # drawn at twice that, then scaled down: anti-aliasing
 SS = 4.0  # line and symbol scale while drawing (= the party map's look at the size shown)
 MIN_ZOOM, MAX_ZOOM = 3, 11
-TOWN_SYMBOLS_FROM = 7  # towns drawn from this zoom; capitals always
-VERSION = "v2"  # bump when the drawing changes: older cached tiles are left behind
+# The globe asks for tiles about a zoom above the one it shows (high-density screens, the globe's curve), so tile
+# zooms here run one ahead of the atlas's label zooms.
+TOWN_SYMBOLS_FROM = 8  # towns drawn from this tile zoom (about zoom 7 on the globe, with their names); capitals always
+VERSION = "v3"  # bump when the drawing changes: older cached tiles are left behind
 
 
 def terrain_density(z: int) -> float:
-    """Fewer terrain symbols far out (a whole region at z5 shows about half), the full density from z8."""
-    return min(1.0, max(0.3, 0.3 + 0.175 * (z - 4)))
+    """Fewer terrain symbols far out, the full density from tile zoom 9 (about zoom 8 on the globe)."""
+    return min(1.0, max(0.3, 0.3 + 0.175 * (z - 5)))
 
 
 class MercatorTile:

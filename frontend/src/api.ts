@@ -265,7 +265,7 @@ export interface HomebrewState {
 }
 
 export interface AtlasState {
-  atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean } | null;
+  atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean; parchment?: string } | null;
   branch: string;
   compare: string | null;
   day: number;

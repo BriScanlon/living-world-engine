@@ -353,7 +353,7 @@ only what they know, on that branch and day.
   heard of drawn faded) and the terrain symbols keep clear of the lettering.
 * **Less busy far out:** names appear as you zoom in. On the globe: capitals always, cities from zoom 5, towns from
   6.5, local places from 9, provinces from 5, seas and gulfs from 3, bays, straits and lakes from 5.5; parchment tiles
-  draw towns from zoom 7 and thin the terrain far out. On the party map, by how close-in it is (how far apart its
+  draw towns from about zoom 7 and thin the terrain far out. On the party map, by how close-in it is (how far apart its
   towns are drawn): far out only capitals, cities, landmarks, the party's place, realms and seas are named, lesser
   towns are dots and the terrain is thinner; closer in, town, province, bay and lake names and building lists appear.
 * **Parchment atlas** (#57, `backend/atlas/parchment.py`): the atlas's *look* switch (beside DM / Party view)
