@@ -229,6 +229,12 @@ is commonly known, because agents read the descriptions of what they know. Anyth
 fails, keeps its template: a world always builds. On qwen3.8:27b (7900 XT) a small world's 57 descriptions take
 about a minute and a half. Mock mode leaves the templates alone.
 
+**Terrain.** Generated regions use the native generator (`backend/atlas/worldgen/`, epic #45): a Voronoi mesh
+(~11,500 cells for a medium region) and a heightmap whose mountain ranges follow tectonic-plate boundaries, with
+coasts drawn by fractal noise. *Continents* gives two or three landmasses with open sea between them, *pangea* one
+great landmass, *islands* and *archipelago* many islands; land share follows the shape. A medium region generates
+in about half a second.
+
 **Your own maps.** *Map source: Use my Azgaar export* uploads a Full JSON from Azgaar's Fantasy Map Generator,
 which runs **self-hosted** as the `fmg` service (http://localhost:8070, a pinned upstream tag; see
 [fmg/README.md](fmg/README.md)); the wizard links to it. Make it a region rather than a planet (*Map size*,
