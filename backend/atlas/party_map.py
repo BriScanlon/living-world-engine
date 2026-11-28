@@ -13,6 +13,7 @@ import math
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+import shapely
 from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
 
@@ -179,13 +180,21 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     view = box(-0.1 * W, -0.1 * H, 1.1 * W, 1.1 * H)
     wob = carto.Wobble(seed, amp=1.6 * SS, scale=40 * SS)
 
+    lon0, lat0 = bounds[0], bounds[1]
+    span = (bounds[2] - bounds[0] + bounds[3] - bounds[1]) * 0.1
+
     def px(geom):
+        geom = shapely.clip_by_rect(geom, lon0 - span, lat0 - span, bounds[2] + span, bounds[3] + span)
         return carto.to_px(geom, proj.arr).intersection(view)
 
-    raw_land = unary_union([px(shape(f["geometry"]).buffer(0)) for f in _features(slug, "land")])
+    land_feats = _features(slug, "land")
+    raw_land = unary_union([px(shape(f["geometry"]).buffer(0)) for f in land_feats])
     relief = [f for f in _features(slug, "relief")]
     cell = _cell_px(proj, relief, raw_land) or 30.0 * SS
-    land = carto.smooth(raw_land, wob, cell)
+    if any((f.get("properties") or {}).get("detail") for f in land_feats):  # already drawn at import (#62)
+        land = raw_land.simplify(0.5 * SS)
+    else:  # an older import: cell outlines, smoothed here
+        land = carto.smooth(raw_land, wob, cell)
     img = Image.new("RGBA", (W, H), SEA + (255,))
     img.alpha_composite(carto.shallows((W, H), land, 22 * SS, SHALLOW + (170,)))
     draw = ImageDraw.Draw(img, "RGBA")

@@ -55,7 +55,7 @@ def import_world(store: GraphStore, path: str | Path, *, branch: str = "main", s
     world = AzgaarWorld.load(path, slug)
     folder = atlas_path(world.slug)
     folder.mkdir(parents=True, exist_ok=True)
-    layers = world.layers()
+    layers = world.layers(detail=get_settings().atlas_coast_detail)
     for name, fc in layers.items():
         (folder / f"{name}.geojson").write_text(json.dumps(fc), encoding="utf-8")
     has_tiles = build_tiles(folder)

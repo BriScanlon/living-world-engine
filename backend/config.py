@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     # On first start, generate the sample planet, import it and place the Greywater demo on it
     atlas_sample_on_startup: bool = True
     tippecanoe_bin: str = "tippecanoe"
+    # Imported coasts get fractal detail down to ~100 m (coves and headlands that appear as you zoom in, #62)
+    atlas_coast_detail: bool = True
 
     # Virtual tabletop (vtt/): where the world engine sends maps and scenes. Empty = not linked.
     vtt_url: str = ""

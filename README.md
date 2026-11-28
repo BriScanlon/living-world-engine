@@ -334,6 +334,12 @@ only what they know, on that branch and day.
   as soft painted washes, dotted province borders, rivers that widen towards the sea, serif lettering, and an aged
   parchment finish. The importer keeps a `relief.geojson` layer (height and biome per land cell) for terrain symbols;
   a world imported before it was added draws without it until re-imported.
+* **Coastlines with detail as you zoom in** (#62): on import the coast loses its cell zigzag and gains fractal coves
+  and headlands down to ~100 m (rougher on high, rocky coasts; lake shores too), so the globe shows more of them the
+  closer you look (the tiles carry what each zoom can show) and the party and zoom-in maps use the same coast. Towns
+  stay on land, ports the smoothing left inland get a narrow estuary to the water, provinces and biomes are fitted to
+  the new coast and rivers end on it. Adds ~5-7 s to an import; `ATLAS_COAST_DETAIL=false` keeps the plain cell
+  coast. Existing worlds get it when re-imported.
 
 ### 9. Travel times (`backend/atlas/travel.py`)
 
