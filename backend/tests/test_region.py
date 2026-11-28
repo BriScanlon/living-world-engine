@@ -108,10 +108,12 @@ def test_journeys_in_a_medium_region_take_days_not_months(tmp_path, monkeypatch)
         sample = towns[::5]  # 40-odd towns is plenty, and keeps the test quick; neighbours come from all towns
         assert 1 <= statistics.median(nearest_days(sample, towns)) <= 4
         cap_days = nearest_days(caps, caps)
-        # highways join neighbouring capitals, and sea lanes (#43) those across a strait
-        assert 5 <= statistics.median(cap_days) <= 20 and max(cap_days) <= 40
+        # highways join neighbouring capitals, and sea lanes (#43) those across a strait. Seven realms in 2,500 x 1,600
+        # km put capitals ~550-750 km apart (14-19 days walking straight); the sea margin (#60) moves land off the
+        # frame and them a little further apart, so the median is up to 25 days by road
+        assert 5 <= statistics.median(cap_days) <= 25 and max(cap_days) <= 40
         # an army marching between neighbouring capitals: weeks, not the year-long marches of the old planet
-        assert statistics.median(nearest_days(caps, caps, "army")) <= 40
+        assert statistics.median(nearest_days(caps, caps, "army")) <= 50  # half walking pace: twice the bound above
         # on long trips the roads beat going straight across country
         far = [(a, b) for a in sample for b in sample if haversine_km((a["lon"], a["lat"]), (b["lon"], b["lat"])) > 500][:12]
         from atlas.travel import route as travel_route

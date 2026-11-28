@@ -64,7 +64,10 @@ def test_towns_sit_where_people_would_live_and_ports_at_harbours():
     towns = [b["cell"] for b in pk["burgs"][1:]]
     assert np.mean(hab[towns]) > 1.4 * np.mean(hab[[c["i"] for c in land]])
     ports = [b for b in pk["burgs"][1:] if b["port"]]
-    assert ports and all(cells[b["cell"]]["harbor"] in (1, 2) for b in ports)  # sheltered coves and river mouths only
+    landings = {r["points"][i][2] for r in pk["routes"] if r["group"] == "searoutes" for i in (0, -1)}
+    # sheltered coves and river mouths only; a landmass with no harbour may get a sea-lane landing on an open coast
+    assert ports and all(cells[b["cell"]]["harbor"] in (1, 2) or b["cell"] in landings for b in ports)
+    assert all(cells[b["cell"]]["harbor"] for b in ports)  # and every port is on the coast
     assert len(ports) / len(towns) < 0.5  # not every town is on the coast: rivers draw them inland too
     # a people keeps its faith across realm borders
     faith = {}

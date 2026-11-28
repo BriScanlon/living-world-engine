@@ -100,3 +100,16 @@ def test_a_medium_region_is_quick():
     t = time.perf_counter()
     _world()
     assert time.perf_counter() - t < 3.0
+
+
+@pytest.mark.parametrize("shape", ["continents", "pangea", "old-world", "islands", "archipelago"])
+def test_every_shape_ends_in_sea_at_the_frame(shape):
+    """#60: no coast is cut straight by the region's edge; land keeps its share."""
+    w = generate(1795 if shape == "continents" else 4, land=shape, climate="temperate", n_states=5,
+                 **REGION_SIZES["medium"])
+    cells, W, H = w["pack"]["cells"], w["info"]["width"], w["info"]["height"]
+    m = 0.02 * min(W, H)
+    frame = [c for c in cells if min(c["p"][0], W - c["p"][0], c["p"][1], H - c["p"][1]) < m]
+    assert frame and all(c["h"] < 20 for c in frame)
+    land = sum(c["h"] >= 20 for c in cells) / len(cells)
+    assert land == pytest.approx(1 - LAND_SHAPES[shape][2], abs=0.05)
