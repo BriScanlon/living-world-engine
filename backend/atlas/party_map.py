@@ -14,6 +14,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 import shapely
+import shapely.prepared
 from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
 
@@ -29,6 +30,16 @@ SEA, SHALLOW, RIPPLE = (128, 164, 176), (176, 204, 204), (86, 122, 134)
 LAND, BORDER, COAST, LANE = (233, 218, 180), (104, 74, 96), (78, 58, 38), (236, 244, 246)
 RIVER, ROAD, INK = (79, 127, 166), (122, 90, 51), (40, 30, 20)
 FOG = (222, 207, 170)  # unexplored: blank, faded parchment
+# the two looks: "colour" (washes of biome and realm colour) and "ink" (paper and ink only, as on Tolkien's maps)
+STYLES = {
+    "colour": {"sea": SEA, "shallow": SHALLOW, "ripple": RIPPLE, "land": LAND, "border": BORDER, "coast": COAST,
+               "river": RIVER, "road": ROAD, "lane": LANE, "washes": True, "water_ink": (52, 86, 110, 255),
+               "water_halo": (200, 220, 224, 170)},
+    "ink": {"sea": (228, 220, 198), "shallow": None, "ripple": (70, 58, 44), "land": (241, 233, 210),
+            "border": (70, 55, 45), "coast": (36, 28, 20), "river": (50, 56, 66), "road": (62, 46, 30),
+            "lane": (120, 108, 92), "washes": False, "water_ink": (46, 40, 34, 255),
+            "water_halo": (228, 220, 198, 200)},
+}
 SYMBOL_SCALE = 0.6  # terrain symbols at 60% of their base size: fine detail, like a printed map
 FOG_UNKNOWN, FOG_HEARD = 253, 150  # fog alpha over the unknown (opaque enough that no ink shows) and the heard-of
 FADED, HALO = (128, 104, 76), (236, 226, 196)  # lettering for what the party has only heard of; the paper halo
@@ -152,6 +163,14 @@ def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dic
 WATER_INK, WATER_HALO = (52, 86, 110, 255), (200, 220, 224, 170)
 
 
+def polylabel_px(g) -> tuple[float, float]:
+    """A point well inside a (pixel) shape: the pole of inaccessibility of its largest part."""
+    from shapely.ops import polylabel
+    big = max(carto.polys(g), key=lambda q: q.area)
+    q = polylabel(big, tolerance=max(1.0, math.sqrt(big.area) / 50))
+    return q.x, q.y
+
+
 def known_waters(waters: list[dict[str, Any]], known_area, min_share: float = 0.002) -> list[tuple[dict[str, Any], Any]]:
     """The named waters the party can name, each with the part of it the party knows (seen or heard of): a cartographer
     letters the stretch of sea you know, not its far middle."""
@@ -170,7 +189,8 @@ def known_waters(waters: list[dict[str, Any]], known_area, min_share: float = 0.
     return out
 
 
-def _lay_out_waters(layout: "frame.Labels", proj: "Projection", waters: list[dict[str, Any]], known_area) -> None:
+def _lay_out_waters(layout: "frame.Labels", proj: "Projection", waters: list[dict[str, Any]], known_area,
+                    ink=WATER_INK, halo=WATER_HALO) -> None:
     """Sea, gulf, bay and strait names in slanted, spaced sea-blue capitals (lakes in plain slanted letters), sized
     to the room the water has, biggest first."""
     from shapely.ops import polylabel
@@ -194,7 +214,7 @@ def _lay_out_waters(layout: "frame.Labels", proj: "Projection", waters: list[dic
         size = int(min(cap, room / max(1, len(text)) * 1.5))
         if size < 12 * SS:  # no room to letter it legibly here
             continue
-        layout.add(text, _font(size), [(x, y + dy * SS, "mm") for dy in (0, -36, 36, -72, 72)], WATER_INK, WATER_HALO,
+        layout.add(text, _font(size), [(x, y + dy * SS, "mm") for dy in (0, -36, 36, -72, 72)], ink, halo,
                    italic=True)
 
 
@@ -218,16 +238,47 @@ def _lay_out_regions(layout: "frame.Labels", proj: "Projection", known: dict[str
         layout.add(frame.spaced(p["name"]) if seen else p["name"], _font((17 if seen else 16) * SS, bold=seen), cands,
                    (92, 66, 40) if seen else FADED, HALO)
     for name, gs in realms.items():
-        g = unary_union(gs)
-        x0, x1 = proj(g.bounds[0], g.bounds[1])[0], proj(g.bounds[2], g.bounds[3])[0]
-        text = frame.spaced(name, gap=2)
-        px_size = min(28 * SS, 0.9 * abs(x1 - x0) / max(1, len(text)) * 1.6)
-        if px_size < 13 * SS:  # too small on this map to letter across
+        g = shapely.make_valid(carto.to_px(unary_union(gs), proj.arr))
+        if g.is_empty:
             continue
-        x, y = proj(*g.representative_point().coords[0])
-        cands = [(x + dx * SS, y + dy * SS, "mm") for dx, dy in ((0, 0), (0, -70), (0, 70), (-120, 0), (120, 0), (0, -140), (0, 140))]
-        cands = [c for c in cands if g.contains(Point(*proj.inverse(c[0], c[1])))] or cands[:1]
-        layout.add(text, _font(int(px_size)), cands, (118, 84, 54, 150), (236, 226, 196, 90))
+        rect = g.minimum_rotated_rectangle
+        rc = list(rect.exterior.coords)[:4] if rect.geom_type == "Polygon" else []
+        if len(rc) < 4:
+            continue
+        e1, e2 = (rc[1][0] - rc[0][0], rc[1][1] - rc[0][1]), (rc[2][0] - rc[1][0], rc[2][1] - rc[1][1])
+        long_e = e1 if math.hypot(*e1) >= math.hypot(*e2) else e2
+        length = math.hypot(*long_e)
+        ang = math.degrees(math.atan2(long_e[1], long_e[0]))
+        ang = (ang + 90) % 180 - 90  # read left to right
+        ang = max(-35.0, min(35.0, ang))  # and never steeper than old maps letter a realm
+        text = frame.spaced(name, gap=2)
+        unit = _font(100).getlength(text) / 100  # width per pixel of type size
+        size = min(30 * SS, 0.8 * length / max(unit, 1e-6))
+        if size < 13 * SS:  # too small on this map to letter across
+            continue
+        c = polylabel_px(g)
+        land = shapely.prepared.prep(g)
+        for k in (1.0, 0.8, 0.65):  # the biggest lettering that fits on the realm's own land
+            if size * k < 13 * SS:
+                break
+            font = _font(int(size * k))
+            half = font.getlength(text) / 2 * 1.08
+            paths = []
+            for a_ in dict.fromkeys((ang, 0.0, 15.0, -15.0)):
+                ux, uy = math.cos(math.radians(a_)), math.sin(math.radians(a_))
+                nx, ny = uy, -ux  # "up" from the baseline
+                for shift in (0, -50, 50, -100, 100):
+                    for bow in (1, -1):
+                        pts = []
+                        for i in range(25):
+                            tt = i / 24 * 2 - 1
+                            off = bow * 0.1 * half * (1 - tt * tt) + shift * SS
+                            pts.append((c[0] + ux * half * tt + nx * off, c[1] + uy * half * tt + ny * off))
+                        paths.append(pts)
+            if layout.add_along(text, font, paths, (118, 84, 54, 150), (236, 226, 196, 90),
+                                inside=lambda x, y: land.contains(Point(x, y)), share=0.85):
+                break
+
 
 
 class NothingKnown(ValueError):
@@ -343,8 +394,13 @@ def _clusters(features: list[dict[str, Any]], proj: Projection, radius: float) -
 
 
 def render(store: GraphStore, branch: str = "main", day: int | None = None,
-           size: tuple[int, int] = SIZE) -> tuple[bytes, dict[str, Any]]:
-    """The party's overland map as a WebP image, plus what it shows."""
+           size: tuple[int, int] = SIZE, style: str | None = None) -> tuple[bytes, dict[str, Any]]:
+    """The party's overland map as a WebP image, plus what it shows. ``style``: "colour" or "ink" (default: the
+    ``PARTY_MAP_STYLE`` setting)."""
+    from config import get_settings
+    style = style if style in STYLES else (get_settings().party_map_style if get_settings().party_map_style in STYLES
+                                            else "colour")
+    pal = STYLES[style]
     st = atlas_state(store, branch, day, None, "party")
     if not st.get("atlas"):
         raise NothingKnown("There's no atlas in this world yet")
@@ -382,7 +438,8 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     n_place_labels = len(layout.placed)
     _lay_out_regions(layout, proj, known, provinces, realms_only=False)
     known_area = unary_union(seen + heard).buffer(0.25 * pad) if (seen or heard) else None
-    _lay_out_waters(layout, proj, _features(slug, "waters"), known_area)
+    _lay_out_waters(layout, proj, _features(slug, "waters"), known_area, ink=pal["water_ink"],
+                    halo=pal["water_halo"])
     # realm names: their own layer, large and faint under the rest; they avoid each other, the furniture and the
     # province names, but may run under a town's name, as on old maps
     realm_layout = frame.Labels(layout.bounds, pad=6 * SS,
@@ -409,29 +466,30 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
         land = raw_land.simplify(0.5 * SS)
     else:  # an older import: cell outlines, smoothed here
         land = carto.smooth(raw_land, wob, cell)
-    img = Image.new("RGBA", (W, H), SEA + (255,))
-    img.alpha_composite(carto.shallows((W, H), land, 22 * SS, SHALLOW + (170,)))
+    img = Image.new("RGBA", (W, H), pal["sea"] + (255,))
+    if pal["shallow"]:
+        img.alpha_composite(carto.shallows((W, H), land, 22 * SS, pal["shallow"] + (170,)))
     draw = ImageDraw.Draw(img, "RGBA")
-    carto.ripples(draw, land, [9 * SS, 18 * SS, 29 * SS], RIPPLE + (150,), max(1, SS))
-    carto.fill(draw, land, LAND + (255,), hole=SEA + (255,))
+    carto.ripples(draw, land, [9 * SS, 18 * SS, 29 * SS], pal["ripple"] + (150,), max(1, SS))
+    carto.fill(draw, land, pal["land"] + (255,), hole=pal["sea"] + (255,))
     mask = Image.new("L", (W, H), 0)
     carto.fill(ImageDraw.Draw(mask), land, 255, hole=0)
     paint = []
     for f in _features(slug, "biomes"):  # biomes, muted into the parchment
         c = _hex(f["properties"].get("color"))
-        paint.append((px(shape(f["geometry"]).buffer(0)), tuple(int(0.65 * c[i] + 0.35 * LAND[i]) for i in range(3)) + (110,)))
+        paint.append((px(shape(f["geometry"]).buffer(0)), tuple(int(0.65 * c[i] + 0.35 * pal["land"][i]) for i in range(3)) + (110,)))
     prov_px = {uid: px(g.buffer(0)) for uid, g in provinces.items()}
-    tint = carto.wash((W, H), paint, cell * 0.45)
+    tint = carto.wash((W, H), paint if pal["washes"] else [], cell * 0.45)
     realms = [(prov_px[uid], _hex(p.get("color")) + (70,)) for uid, p in known.items()
               if p["known"] == "visited" and p.get("controller") and uid in prov_px]
-    if realms:  # who holds the provinces the party has seen: a soft wash of the realm's colour
+    if realms and pal["washes"]:  # who holds the provinces the party has seen: a soft wash of the realm's colour
         tint.alpha_composite(carto.wash((W, H), realms, cell * 0.8))
     base = img.copy()
     base.alpha_composite(tint)
     img = Image.composite(base, img, mask)  # colour stays inside the smoothed coast
     draw = ImageDraw.Draw(img, "RGBA")
     for pts in carto.borders(list(prov_px.values()), wob, cell, clip=land.buffer(-1.5 * SS)):
-        _dash(draw, pts, BORDER + (150,), max(1, SS), int(1.5 * SS), gap=3 * SS)  # dotted, unlike roads
+        _dash(draw, pts, pal["border"] + (150,), max(1, SS), int(1.5 * SS), gap=3 * SS)  # dotted, unlike roads
     river_lines, road_lines = [], []
     for f in _features(slug, "rivers"):
         g = px(shape(f["geometry"]))
@@ -462,17 +520,17 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
         symbols.draw(img, symbols.place(cells, cell, mask, avoid, SS * SYMBOL_SCALE, seed))
     draw = ImageDraw.Draw(img, "RGBA")
     for ln, pts in river_lines:
-        carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, RIVER + (255,))
+        carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, pal["river"] + (255,))
     for group, pts in road_lines:
         if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
-            _dash(draw, pts, LANE + (210,), 2 * SS, 5 * SS)
+            _dash(draw, pts, pal["lane"] + (210,), 2 * SS, 5 * SS)
         else:
-            _dash(draw, pts, ROAD + (225,), (3 if group == "highways" else 2) * SS, 9 * SS)
+            _dash(draw, pts, pal["road"] + (225,), (3 if group == "highways" else 2) * SS, 9 * SS)
     from shapely.geometry import LineString as _Line
     symbols.crossings(img, [(g, _Line(pts)) for g, pts in road_lines if len(pts) > 1],
                       unary_union([_Line(pts) for _, pts in river_lines if len(pts) > 1]) if river_lines else None, SS)
     draw = ImageDraw.Draw(img, "RGBA")
-    carto.outline(draw, land, COAST + (255,), 2 * SS)  # the inked coast, lakes too
+    carto.outline(draw, land, pal["coast"] + (255,), 2 * SS)  # the inked coast, lakes too
     if len(cells):
         symbols.cliffs(img, land, mask, _height_at(cells, cell), SS)
 
@@ -537,7 +595,7 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
             "provinces": {"visited": len(seen), "heard": len(heard)},
             "places": {"visited": sum(f["properties"]["known"] == "visited" for f in places),
                        "heard": sum(f["properties"]["known"] == "heard" for f in places)},
-            "where": party.get("where")}
+            "where": party.get("where"), "style": style}
     return buf.getvalue(), meta
 
 
@@ -546,13 +604,14 @@ def _tag(store: GraphStore) -> str:
     return f"lwe-overland:{store.db}"
 
 
-def to_table(store: GraphStore, branch: str = "main", day: int | None = None) -> dict[str, Any]:
+def to_table(store: GraphStore, branch: str = "main", day: int | None = None, style: str | None = None) -> dict[str, Any]:
     """Draw the party's map and show it on the table, replacing this world's older party maps in the VTT library."""
     from vtt_link import client
-    data, meta = render(store, branch, day)
+    data, meta = render(store, branch, day, style=style)
     tag = _tag(store)
     asset = client.upload_map(data, "party-map.webp", title=meta["title"],
-                              tags=[tag, f"lwe-day:{meta['day']}", f"lwe-branch:{branch}"], push=True)
+                              tags=[tag, f"lwe-day:{meta['day']}", f"lwe-branch:{branch}", f"lwe-style:{meta['style']}"],
+                              push=True)
     replaced = 0
     for m in client.maps():
         if m["id"] != asset["id"] and tag in (m.get("tags") or []):
@@ -568,9 +627,11 @@ def refresh_if_shown(store: GraphStore, branch: str = "main", day: int | None = 
         return False
     try:
         current = (client.table_state() or {}).get("map") or {}
-        if _tag(store) not in (current.get("tags") or []):
+        tags = current.get("tags") or []
+        if _tag(store) not in tags:
             return False
-        to_table(store, branch, day)
+        style = next((x.split(":", 1)[1] for x in tags if x.startswith("lwe-style:")), None)
+        to_table(store, branch, day, style=style)  # redrawn in the style it was put up in
         return True
     except (client.VTTError, NothingKnown):
         return False

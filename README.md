@@ -351,6 +351,11 @@ only what they know, on that branch and day.
   map symbols and lettering shrink to fit. A double-ruled frame with a graticule border, a compass rose, a scroll
   cartouche and a scale bar in km and miles finish it; the unknown is blank, unexplored parchment (places only
   heard of drawn faded) and the terrain symbols keep clear of the lettering.
+* **Two looks, and curved realm names** (#57): the party map comes in `colour` (biome and realm washes) or `ink`
+  (paper and ink only, like Tolkien's maps: a paper sea with inked ripples, no colour at all). Pick it next to *Party
+  map on the table* (or `?style=` / `"style"` on the API); the default is the `PARTY_MAP_STYLE` setting, and a map on
+  the table redraws in the style it was put up in. Realm names are lettered letter by letter along a gentle arc
+  following the realm's long axis, kept on the realm's own land.
 * **Named waters** (#57, `backend/atlas/waters.py`): on import the open sea, its gulfs, bays and straits (water that a
   morphological opening separates from the open sea; a strait meets it twice) and lakes are found and named from the
   land around them (*the Thessaly Sea*, *the Mordra Strait*, *the Bay of Brinstead*, *Lake Holmford*) into
@@ -450,7 +455,7 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/world/agent/{id}?branch=&day=` | an agent's epistemic context |
 | GET | `/api/atlas?branch=&day=&compare=&view=dm\|party` | live map state: territory, places, events, rumors (party view: fog of war) |
 | POST | `/api/party/knowledge` | `{place, state: visited\|heard\|unknown, branch, day}`: what the party knows of a place |
-| GET · POST | `/api/party/map.webp?branch=&day=` · `/api/party/map-to-table` | the party's overland map · show it on the table |
+| GET · POST | `/api/party/map.webp?branch=&day=&style=` · `/api/party/map-to-table` | the party's overland map (`style`: `colour` or `ink`) · show it on the table |
 | GET | `/api/travel?a=&b=&branch=&day=` | route and days between two things: on foot, horseback, an army, news |
 | GET · POST | `/api/atlas/local-brief?lon=&lat=` · `/api/atlas/local-map` | describe a spot on the globe · paint it (poll `/api/vtt/jobs/{job}/collect`) |
 | GET | `/api/atlas/place/{id}` · `/api/atlas/files/{slug}/{file}` | place detail · static layers (GeoJSON / PMTiles) |

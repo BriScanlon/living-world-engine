@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, PartyKnows, PlaceDetail, VttMap } from "../api";
+import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, PartyKnows, PartyMapStyle, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -34,10 +34,11 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const [zoom, setZoom] = useState(0);
   const [tableNote, setTableNote] = useState<string | null>(null);
   const [tableBusy, setTableBusy] = useState(false);
+  const [mapStyle, setMapStyle] = useState<PartyMapStyle>("colour");
   const partyToTable = async () => {
     setTableBusy(true); setTableNote(null); setError(null);
     try {
-      const r = await api.partyMapToTable({ branch, day });
+      const r = await api.partyMapToTable({ branch, day, style: mapStyle });
       setTableNote(`On the table: ${r.title}. It redraws itself when you mark what the party learns.`);
     } catch (e) { setError((e as Error).message); }
     finally { setTableBusy(false); }
@@ -404,7 +405,13 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
                   title="Draw this view as an overland map and show it on the players' table">
                   {tableBusy ? <Spinner /> : "▶"} Party map on the table
                 </Button>
-                <a className="text-xs text-ember-300 hover:underline" href={api.partyMapUrl(branch, day)} target="_blank" rel="noreferrer">preview</a>
+                <select className="rounded bg-ink-800 px-1.5 py-1 text-xs" value={mapStyle}
+                  onChange={(e) => setMapStyle(e.target.value as PartyMapStyle)}
+                  title="Colour washes, or paper and ink only like Tolkien's maps">
+                  <option value="colour">colour</option>
+                  <option value="ink">ink</option>
+                </select>
+                <a className="text-xs text-ember-300 hover:underline" href={api.partyMapUrl(branch, day, mapStyle)} target="_blank" rel="noreferrer">preview</a>
               </>
             )}
             {view === "dm" && (

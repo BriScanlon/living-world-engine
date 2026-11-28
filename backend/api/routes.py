@@ -332,13 +332,13 @@ def party_knowledge(body: PartyMarkBody) -> dict[str, Any]:
 
 
 @router.get("/party/map.webp")
-def party_map_image(branch: str = MAIN, day: int | None = None):
+def party_map_image(branch: str = MAIN, day: int | None = None, style: str | None = None):
     """The party's overland map: the atlas as the party knows it, fogged, as an image."""
     from fastapi.responses import Response
 
     from atlas.party_map import NothingKnown, render
     try:
-        data, _ = render(_store(), branch, day)
+        data, _ = render(_store(), branch, day, style=style)
     except NothingKnown as e:
         raise HTTPException(404, str(e)) from e
     return Response(data, media_type="image/webp", headers={"Cache-Control": "no-store"})
@@ -347,6 +347,7 @@ def party_map_image(branch: str = MAIN, day: int | None = None):
 class PartyMapBody(BaseModel):
     branch: str = MAIN
     day: int | None = None
+    style: str | None = None  # "colour" or "ink"; default: the PARTY_MAP_STYLE setting
 
 
 @router.post("/party/map-to-table")
@@ -355,7 +356,7 @@ def party_map_to_table(body: PartyMapBody) -> dict[str, Any]:
     from atlas.party_map import NothingKnown, to_table
     from vtt_link import client
     try:
-        return to_table(_store(), body.branch, body.day)
+        return to_table(_store(), body.branch, body.day, style=body.style)
     except NothingKnown as e:
         raise HTTPException(400, str(e)) from e
     except client.VTTError as e:
