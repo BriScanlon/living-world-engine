@@ -7,7 +7,8 @@ destination, or go straight across country, whichever is quicker. Off-road trave
 
 Paces follow the SRD's overland travel (normal pace 24 miles a day on foot, fast 30): an army marches at half that,
 and news travels with merchants and riders. Stretches over water go by ship at a sailing ship's 2 mph, around the
-clock (48 miles a day), whoever is travelling.
+clock (48 miles a day), whoever is travelling: straight across, or along the atlas's sea lanes (route group
+``searoutes``), which the road network sails rather than walks.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ SHIP_KM_PER_DAY = 48 * MILE_KM
 OFFROAD_SLOWDOWN = 2.0
 OFFROAD_WINDING = 1.25
 SNAP_KM = 5.0  # road ends this close together are one junction
+SEA_WEIGHT = PACE_KM_PER_DAY["foot"] / SHIP_KM_PER_DAY  # a km sailed, in km walked on a road
 
 
 def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -42,7 +44,13 @@ def haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
 @dataclass
 class RoadNet:
     nodes: list[tuple[float, float]] = field(default_factory=list)
-    edges: dict[int, list[tuple[int, float]]] = field(default_factory=dict)
+    # node -> [(next node, km)] or [(next node, km, by_sea)]: sea lanes are sailed, not walked
+    edges: dict[int, list[tuple]] = field(default_factory=dict)
+
+    def leg(self, a: int, b: int) -> tuple[float, bool]:
+        """km and whether by sea, for the edge a -> b (the quicker if there are two)."""
+        found = [(e[1], len(e) > 2 and bool(e[2])) for e in self.edges.get(a, []) if e[0] == b]
+        return min(found, key=lambda kb: kb[0] * (SEA_WEIGHT if kb[1] else 1.0)) if found else (0.0, False)
 
     def nearest(self, p: tuple[float, float]) -> tuple[int, float] | None:
         if not self.nodes:
@@ -63,8 +71,9 @@ class RoadNet:
                 while path[-1] in prev:
                     path.append(prev[path[-1]])
                 return d, path[::-1]
-            for v, w in self.edges.get(u, []):
-                nd = d + w
+            for edge in self.edges.get(u, []):
+                v, w = edge[0], edge[1]
+                nd = d + (w * SEA_WEIGHT if len(edge) > 2 and edge[2] else w)  # judged at foot pace
                 if nd < dist.get(v, math.inf):
                     dist[v], prev[v] = nd, u
                     heapq.heappush(heap, (nd, v))
@@ -89,6 +98,7 @@ def _roads(path: str, mtime: float) -> RoadNet:  # mtime: reload when the atlas 
 
     for f in json.loads(Path(path).read_text(encoding="utf-8")).get("features", []):
         g = f.get("geometry") or {}
+        by_sea = (f.get("properties") or {}).get("group") == "searoutes"
         lines = [g["coordinates"]] if g.get("type") == "LineString" else g.get("coordinates", []) if g.get("type") == "MultiLineString" else []
         for line in lines:
             ids = [node(c) for c in line]
@@ -96,8 +106,8 @@ def _roads(path: str, mtime: float) -> RoadNet:  # mtime: reload when the atlas 
                 if a == b:
                     continue
                 w = haversine_km(net.nodes[a], net.nodes[b])
-                net.edges.setdefault(a, []).append((b, w))
-                net.edges.setdefault(b, []).append((a, w))
+                net.edges.setdefault(a, []).append((b, w, by_sea))
+                net.edges.setdefault(b, []).append((a, w, by_sea))
     return net
 
 
@@ -172,9 +182,16 @@ def route(a: tuple[float, float], b: tuple[float, float], net: RoadNet | None = 
         if na and nb:
             found = net.shortest(na[0], nb[0])
             if found:
-                road_km, ids = found
+                _, ids = found
+                road_km = sea_km = 0.0
+                for u, v in zip(ids, ids[1:]):
+                    km, by_sea = net.leg(u, v)
+                    if by_sea:
+                        sea_km += km
+                    else:
+                        road_km += km
                 off = (na[1] + nb[1]) * OFFROAD_WINDING
-                via = Route(road_km + off, road_km, straight, [a, *[net.nodes[i] for i in ids], b])
+                via = Route(road_km + sea_km + off, road_km, straight, [a, *[net.nodes[i] for i in ids], b], sea_km=sea_km)
                 if via.days() < best.days():
                     best = via
     return best

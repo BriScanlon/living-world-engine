@@ -467,7 +467,23 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
         return out[::-1]
 
     routes = []
-    for s in states[1:]:
+    if mesh == "voronoi":  # a road network, trails and sea lanes (#43)
+        from atlas.worldgen import routes as wg_routes
+        pairs = [(burgs[s["capital"]]["cell"], burgs[states[o]["capital"]]["cell"])
+                 for s in states[1:] for o in s.get("neighbors", []) if o > s["i"]]
+        planned = wg_routes.plan(np.asarray(centers, dtype=float), nbrs, h, biome, feature, hydro.flux,
+                                 [b["cell"] for b in burgs[1:]], pairs, [b["cell"] for b in burgs[1:] if b["port"]],
+                                 max_link_px=3.5 * TOWN_SPACING_KM / km_px if region else 8 * radius,
+                                 max_sea_px=450 / km_px if region else 30 * radius)
+        for r in planned:
+            routes.append({"i": len(routes), "group": r["group"],
+                           "points": [[centers[c][0], centers[c][1], c] for c in r["cells"]]})
+            if r["group"] == "searoutes":  # a lane's ends are landings: ports
+                for c in (r["cells"][0], r["cells"][-1]):
+                    if burg_of[c]:
+                        burgs[burg_of[c]]["port"] = 1
+                        burgs[burg_of[c]]["type"] = "Naval"
+    for s in (states[1:] if mesh != "voronoi" else []):
         cap = burgs[s["capital"]]
         prev = tree(cap["cell"])
         for b in burgs[1:]:

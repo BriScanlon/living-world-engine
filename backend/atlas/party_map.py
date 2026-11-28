@@ -176,7 +176,11 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     for f in _features(slug, "rivers"):
         _line(draw, proj, shape(f["geometry"]), RIVER + (255,), 3 * SS)
     for f in _features(slug, "roads"):
-        _line(draw, proj, shape(f["geometry"]), ROAD + (220,), 2 * SS, dash=9 * SS)
+        group = (f.get("properties") or {}).get("group")
+        if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
+            _line(draw, proj, shape(f["geometry"]), (205, 228, 245, 200), 2 * SS, dash=5 * SS)
+        else:
+            _line(draw, proj, shape(f["geometry"]), ROAD + (220,), (3 if group == "highways" else 2) * SS, dash=9 * SS)
     for g in provinces.values():
         _fill(draw, proj, g, None, outline=BORDER + (150,), width=SS)
 

@@ -243,7 +243,9 @@ with ice only on its highest peaks). Peoples and polities follow the land: cultu
 are divided by mountains and sea, realms expand from capitals at a cost that rises over mountains, across rivers and
 into another people's land (so borders follow ridges, rivers and cultures; only glaciers stay wild), towns go where
 people would live (good land, rivers, sheltered harbours, which become the ports), and provinces are even
-county-sized patches, each with a town. A medium region generates in under a second.
+county-sized patches, each with a town. Roads join neighbouring towns (a spanning tree of least-cost paths that keep
+to valleys and passes, merging into trunks), trails cut long detours, highways join neighbouring capitals, and sea
+lanes link ports across water, which travel sails at ship speed. A medium region generates in about a second.
 
 **Your own maps.** *Map source: Use my Azgaar export* uploads a Full JSON from Azgaar's Fantasy Map Generator,
 which runs **self-hosted** as the `fmg` service (http://localhost:8070, a pinned upstream tag; see
@@ -330,7 +332,8 @@ only what they know, on that branch and day.
 
 Distance now matters in the world:
 
-* **Routes** are the quicker of across country or along the atlas's roads (Dijkstra over the road network). Overland
+* **Routes** are the quicker of across country or along the atlas's roads (Dijkstra over the road network; sea lanes,
+  route group `searoutes`, are sailed at ship speed). Overland
   stretches count as difficult terrain (half pace, 25% longer than the straight line); stretches over water go by
   ship. Places in the same town are no journey.
 * **Paces** follow the SRD's overland travel: 24 miles a day on foot, 30 on horseback, 12 for an army, news at 30 with
