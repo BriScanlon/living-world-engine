@@ -31,6 +31,7 @@ def _bootstrap() -> None:
     created = store.ensure_database()
     if store.db != settings.terminusdb_db:  # a wizard-made campaign: only keep its schema current
         log.info("Active campaign: %s", store.db)
+        _warm_parchment(store)
         return
     if settings.seed_on_startup and (created or not store.all_documents("main", doc_type="Character")):
         result = seed(store)
@@ -42,6 +43,17 @@ def _bootstrap() -> None:
                 log.info("Imported sample atlas %s (%s documents)", placed["name"], placed["documents"])
         except Exception:  # noqa: BLE001 - the dashboard still works without a map
             log.exception("Sample atlas import failed")
+    _warm_parchment(store)
+
+
+def _warm_parchment(store) -> None:
+    """Draw the active campaign's parchment tiles ahead (a no-op for those already cached)."""
+    try:
+        from atlas.parchment import warm_in_background
+        for a in store.all_documents("main", doc_type="WorldAtlas"):
+            warm_in_background(a.get("uid") or a["@id"].split("/", 1)[1])
+    except Exception:  # noqa: BLE001 - tiles are still drawn when asked for
+        log.exception("Could not start drawing parchment tiles ahead")
 
 
 @asynccontextmanager

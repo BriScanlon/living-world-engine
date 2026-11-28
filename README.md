@@ -352,7 +352,7 @@ only what they know, on that branch and day.
   cartouche and a scale bar in km and miles finish it; the unknown is blank, unexplored parchment (places only
   heard of drawn faded) and the terrain symbols keep clear of the lettering.
 * **Less busy far out:** names appear as you zoom in. On the globe: capitals always, cities from zoom 5, towns from
-  6.5, local places from 9, provinces from 5, seas and gulfs from 3, bays, straits and lakes from 5.5; parchment tiles
+  6.5, local places from 9, provinces from 6, seas and gulfs from 3, bays, straits and lakes from 5.5; parchment tiles
   draw towns from about zoom 7 and thin the terrain far out. On the party map, by how close-in it is (how far apart its
   towns are drawn): far out only capitals, cities, landmarks, the party's place, realms and seas are named, lesser
   towns are dots and the terrain is thinner; closer in, town, province, bay and lake names and building lists appear.
@@ -362,6 +362,13 @@ only what they know, on that branch and day.
   towns) under the atlas's own realm colours, borders, fog, markers and lettering (in ink on paper), with sea and lake
   names. Tiles meet seamlessly (fixed cell size per zoom, no wobble or thinning, a margin both neighbours draw alike),
   take ~1 s each the first time and are cached under the atlas folder (cleared on re-import).
+* **Parchment drawn ahead:** so zooming doesn't wait on that second per tile, every tile over land up to tile zoom 8
+  (about zoom 7 on the globe: a few hundred tiles per look for a medium region, the far zooms first) is
+  drawn in a background thread: the Parchment look after an import or a new wizard world and at start-up for the active
+  campaign, either look once a world's tiles in it are first asked for (so Ink is drawn only if someone uses it). It
+  pauses while a viewer's own tiles are drawing; closer zooms are still drawn when asked for. A medium region takes
+  ~5-10 minutes per look the first time, a large one ~20; restarts skip what is cached. Settings: `PARCHMENT_WARM_ZOOM` (8; below 3 turns it off) and `PARCHMENT_WARM_TILES` (at most 1500
+  per look, whole zooms only); progress per look is `atlas.parchment_warm` in `GET /api/atlas`.
 * **Two looks, and curved realm names** (#57): the party map comes in `colour` (biome and realm washes) or `ink`
   (paper and ink only, like Tolkien's maps: a paper sea with inked ripples, no colour at all). Pick it next to *Party
   map on the table* (or `?style=` / `"style"` on the API); the default is the `PARTY_MAP_STYLE` setting, and a map on

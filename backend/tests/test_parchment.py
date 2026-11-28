@@ -88,3 +88,47 @@ def test_ink_tiles_have_no_colour(world):
 def test_far_out_tiles_are_sparser():
     from atlas.parchment import terrain_density
     assert terrain_density(5) < terrain_density(7) < terrain_density(9) == 1.0
+
+
+def test_only_tiles_over_land_are_drawn_ahead(world):
+    from atlas.parchment import tiles_over_land
+    slug, (lon, lat) = world
+    tiles = tiles_over_land(slug, 6)
+    assert _tile_at(lon, lat, 6) in tiles  # the land's own tile
+    assert (0, 0) not in tiles and len(set(tiles)) == len(tiles)
+    assert len(tiles_over_land(slug, 7)) > len(tiles)
+    assert tiles_over_land(slug, 2) == [] and tiles_over_land("no-such-world", 6) == []
+
+
+def test_drawing_ahead_takes_whole_zooms_up_to_the_cap(world):
+    from atlas.parchment import tiles_over_land, warm_plan
+    slug, _ = world
+    n = {z: len(tiles_over_land(slug, z)) for z in (3, 4, 5, 6)}
+    plan = warm_plan(slug, 6, 10 ** 6)
+    assert len(plan) == sum(n.values())
+    assert [z for z, *_ in plan] == sorted(z for z, *_ in plan)  # the far views first
+    capped = warm_plan(slug, 6, n[3] + n[4] + n[5] + n[6] - 1)
+    assert {z for z, *_ in capped} == {3, 4, 5}  # zoom 6 didn't fit: none of it, not half
+
+
+def test_warm_draws_the_plan_once_and_clears_older_drawings(world):
+    from atlas import parchment
+    slug, _ = world
+    old = parchment.cache_dir(slug) / "v0" / "colour"
+    old.mkdir(parents=True, exist_ok=True)
+    status = {}
+    first = parchment.warm(slug, 5, 10 ** 6, "ink", status=status)
+    plan = parchment.warm_plan(slug, 5, 10 ** 6)
+    assert status == {"total": len(plan), "done": len(plan)}
+    assert all(parchment.tile_file(slug, z, x, y, "ink").exists() for z, x, y in plan)
+    assert first <= len(plan) and parchment.warm(slug, 5, 10 ** 6, "ink") == 0  # all cached now
+    assert not old.parent.exists()
+    assert not list(parchment.cache_dir(slug).rglob("*.part"))  # whole files only
+
+
+def test_drawing_ahead_can_be_turned_off(world):
+    from atlas import parchment
+    slug, _ = world
+    assert parchment.warm_in_background(slug) is False  # tests run with PARCHMENT_WARM_ZOOM=0 (conftest)
+    assert parchment.warm_in_background(slug, "ink") is False
+    assert parchment.warm_status(slug) == {}

@@ -55,6 +55,8 @@ def import_world(store: GraphStore, path: str | Path, *, branch: str = "main", s
     world = AzgaarWorld.load(path, slug)
     folder = atlas_path(world.slug)
     folder.mkdir(parents=True, exist_ok=True)
+    from atlas import parchment
+    parchment.forget_warm(world.slug)
     shutil.rmtree(folder / "parchment", ignore_errors=True)  # parchment tiles of the old map (#57)
     layers = world.layers(detail=get_settings().atlas_coast_detail)
     for name, fc in layers.items():
@@ -70,6 +72,7 @@ def import_world(store: GraphStore, path: str | Path, *, branch: str = "main", s
         bb = world.bbox()
         centre = ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2)
     docs.append(world.atlas_doc([n for n in layers if n in LAYERS], has_tiles, centre))  # relief: renderers only
+    parchment.warm_in_background(world.slug)  # the regional zooms, ready before anyone zooms in
     store.upsert(docs, branch, f"[atlas] import {world.name} from Azgaar: "
                                f"{sum(d['@type'] == 'Faction' for d in docs)} realms, "
                                f"{sum(d['@type'] == 'Province' for d in docs)} provinces, "
@@ -209,6 +212,11 @@ def _parchment_version() -> str:
     return VERSION
 
 
+def _parchment_warm(slug: str) -> dict[str, Any] | None:
+    from atlas.parchment import warm_status
+    return warm_status(slug)
+
+
 def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
                 compare: str | None = None, view: str = "dm") -> dict[str, Any]:
     """Live map state. ``view="party"`` shows only what the party knows (see :mod:`atlas.party`)."""
@@ -300,7 +308,7 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
         "atlas": {"slug": a["uid"], "name": a["name"], "bbox": json.loads(a["bbox"]),
                   "centre": json.loads(a["centre"]) if a.get("centre") else None,
                   "layers": json.loads(a["layers"]), "has_tiles": a["has_tiles"],
-                  "parchment": _parchment_version()},
+                  "parchment": _parchment_version(), "parchment_warm": _parchment_warm(a["uid"])},
         "branch": branch, "compare": None if pv else compare, "day": the_day, "max_day": full.max_day(),
         "view": "party" if pv else "dm",
         "party": _party_summary(w, pv) if view == "party" else None,

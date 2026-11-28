@@ -119,14 +119,20 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
 - **Parchment atlas tiles** (#57, `atlas/parchment.py`): `render_tile(slug, z, x, y, style)` draws through
   `party_map.draw_world` (shared with the party map) with a `MercatorTile` projection, `SS=4` at 1024 px then scaled to
   512 (served as 256 css px); seamless because `cell_px` is fixed per zoom, `wobble=False`, `budget` unlimited and
-  `keep` = tile + a band both neighbours draw. Cache `<atlas>/<slug>/parchment/<style>/z/x/y.webp`, removed by
+  `keep` = tile + a band both neighbours draw. Cache `<atlas>/<slug>/parchment/<VERSION>/<style>/z/x/y.webp` (written whole: `.part` + `os.replace`), removed by
   `import_world`. Frontend: raster source `parchment` (z3-11) above `biomes`, toggled by `look`; it hides biomes,
   rivers, roads and sea lanes and recolours `label-*` to ink. `waters.geojson` is served and lettered (`label-water`).
 - **Level of detail:** `party_map.closeness(places, proj)` = median town spacing / 40 base px; thresholds
   `SHOW_TOWN_NAMES` (0.75), `SHOW_TOWN_SYMBOLS` (0.5), `SHOW_PROVINCES`/`SHOW_BAYS` (0.6), `SHOW_LAKES` (0.75); terrain
   `density` = closeness clamped to 0.45-1 (`symbols.place(density=)`). Tiles: `parchment.terrain_density(z)`,
   `TOWN_SYMBOLS_FROM` 8 (tile zooms run ~1 ahead of the globe's), cache path includes `VERSION` (bump it when the drawing changes). Atlas label `minzoom`s in
-  `Atlas.tsx` (towns 6.5, cities 5, local 9, provinces 5, `label-water` 3, `label-water-small` 5.5).
+  `Atlas.tsx` (towns 6.5, cities 5, local 9, provinces 6, `label-water` 3, `label-water-small` 5.5).
+- **Drawing ahead** (`parchment.warm_in_background(slug, style)`): one daemon thread per atlas folder + `VERSION` +
+  look draws `warm_plan` (tiles over land, `tiles_over_land`, zoom by zoom up to `parchment_warm_zoom` 8, whole zooms
+  up to `parchment_warm_tiles`), skipping cached tiles and deleting other `VERSION` folders. `colour` is started by
+  `import_world` (after `forget_warm`), the wizard's `_build_world` and `main._warm_parchment` at start-up; the tile
+  route starts the look it was asked for (a no-op once running or finished). Viewers' `render_tile` calls bump `_asked` and the warmer waits for 0.
+  `tests/conftest.py` sets `PARCHMENT_WARM_ZOOM=0` so test imports don't start threads; tests call `warm` directly.
 - **Party map styles** (#57): `party_map.STYLES` (`colour`, `ink`) are palettes for the world section; setting
   `party_map_style`; `render(..., style=)`, `to_table(..., style=)` tags the VTT map `lwe-style:<style>` and
   `refresh_if_shown` redraws in it. Realm names use `frame.Labels.add_along` (per-letter positions, angles and boxes;

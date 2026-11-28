@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     atlas_coast_detail: bool = True
     # The party map's look: "colour" (biome and realm washes) or "ink" (paper and ink only, like Tolkien's maps)
     party_map_style: str = "colour"
+    # Parchment atlas tiles over land are drawn ahead in the background up to this tile zoom (below 3 = off), at most
+    # this many per look: zoom 8 is about zoom 7 on the globe, a few hundred tiles for a medium region
+    parchment_warm_zoom: int = 8
+    parchment_warm_tiles: int = 1500
 
     # Virtual tabletop (vtt/): where the world engine sends maps and scenes. Empty = not linked.
     vtt_url: str = ""

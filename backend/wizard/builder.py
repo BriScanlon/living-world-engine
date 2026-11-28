@@ -196,6 +196,8 @@ def _build_world(answers: dict[str, Any], emit: Callable[..., None] | None, hb_e
     for lname, fc in layers.items():
         (folder / f"{lname}.geojson").write_text(json.dumps(fc), encoding="utf-8")
     has_tiles = build_tiles(folder)
+    from atlas.parchment import warm_in_background
+    warm_in_background(slug)  # parchment tiles for the regional zooms, drawn while the DM reads the wizard's summary
     bb = world.bbox()
     atlas = world.atlas_doc(list(layers), has_tiles, ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2))
     atlas["name"] = name
