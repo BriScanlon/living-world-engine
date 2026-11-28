@@ -18,7 +18,8 @@ from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
 
 from atlas import cartography as carto
-from atlas import symbols
+from atlas import emblems, frame, symbols
+from atlas.travel import haversine_km
 from atlas.service import atlas_path, atlas_state
 from graph.store import GraphStore
 
@@ -27,9 +28,12 @@ SS = 2  # draw at twice the size, then shrink: cheap anti-aliasing for polygons 
 SEA, SHALLOW, RIPPLE = (128, 164, 176), (176, 204, 204), (86, 122, 134)
 LAND, BORDER, COAST, LANE = (233, 218, 180), (104, 74, 96), (78, 58, 38), (236, 244, 246)
 RIVER, ROAD, INK = (79, 127, 166), (122, 90, 51), (40, 30, 20)
-FOG = (16, 20, 28)
+FOG = (222, 207, 170)  # unexplored: blank, faded parchment
 SYMBOL_SCALE = 0.6  # terrain symbols at 60% of their base size: fine detail, like a printed map
-FOG_UNKNOWN, FOG_HEARD = 253, 120  # fog alpha over the unknown (opaque enough that no ink shows) and the heard-of
+FOG_UNKNOWN, FOG_HEARD = 253, 150  # fog alpha over the unknown (opaque enough that no ink shows) and the heard-of
+FADED, HALO = (128, 104, 76), (236, 226, 196)  # lettering for what the party has only heard of; the paper halo
+SETTLEMENT_KM = 25  # a building or district this close to a town is part of it (as travel treats it)
+MARGIN, BAND = 14, 12  # the frame: margin outside it and the graticule band, in base pixels
 
 
 def _cell_px(proj: "Projection", relief: list[dict[str, Any]], land) -> float | None:
@@ -68,6 +72,113 @@ def _height_at(cells, cell: float):
         j = np.clip(((pts[:, 1] - y0) / cell).astype(int) + 1, 0, ny - 1)
         return grid[i, j]
     return at
+
+
+def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dict[str, Any]], party: dict[str, Any],
+                    events: list[dict[str, Any]] = ()) -> list[dict[str, Any]]:
+    """Where each known place's symbol goes and where its name fits; returns the symbols (marks) to draw."""
+    marks: list[dict[str, Any]] = []
+    # every settlement gets its own symbol; buildings and districts are listed under the settlement they sit in
+    towns = [f for f in places if f["properties"].get("kind") in emblems.SETTLEMENTS]
+    groups = _clusters(towns, proj, 8 * SS)
+    for f in places:
+        if f["properties"].get("kind") in emblems.SETTLEMENTS or f["properties"].get("kind") == "continent":
+            continue
+        c = f["geometry"]["coordinates"]
+        near = min(groups, default=None, key=lambda g: haversine_km(c, g[0]["geometry"]["coordinates"]))
+        if near and haversine_km(c, near[0]["geometry"]["coordinates"]) < SETTLEMENT_KM:  # in that town
+            near.append(f)
+        else:
+            groups.append([f])
+    groups.sort(key=lambda g: (not any(p["properties"].get("here") for p in g), RANK.get(g[0]["properties"].get("kind"), 9)))
+    # crowded maps draw smaller symbols: scaled to how far apart the settlements typically are
+    pts = [proj(*g[0]["geometry"]["coordinates"]) for g in groups]
+    gaps = sorted(min((math.dist(a, b) for b in pts if b is not a), default=1e9) for a in pts)
+    k = min(1.0, max(0.45, (gaps[len(gaps) // 2] if gaps else 1e9) / (40 * SS)))
+    for group in groups:  # emblems first, so labels avoid the ones that matter
+        head = group[0]["properties"]
+        x, y = proj(*group[0]["geometry"]["coordinates"])
+        emblem = emblems.emblem_for(head.get("kind"), head.get("name"))
+        major = head.get("kind") in ("capital", "city") or (emblem and head.get("kind") not in emblems.SETTLEMENTS)
+        here = any(g["properties"].get("here") for g in group)
+        scale = max(k, 0.7) if major or here else k
+        half = emblems.SIZE.get(emblem, 22) * SS * 0.5 * scale if emblem else 4 * SS
+        state = "visited" if any(g["properties"]["known"] == "visited" for g in group) else "heard"
+        box = (x - half * 1.1, y - half * 1.3, x + half * 1.1 + (22 * SS * scale if head.get("port") else 0), y + half * 1.1)
+        marks.append({"x": x, "y": y, "emblem": emblem, "half": half, "state": state, "box": box, "group": group,
+                      "port": head.get("port"), "here": here, "scale": scale})
+        if major or here:  # lesser settlements' symbols may sit under a label's halo
+            layout.reserve(box)
+    for e in events:  # battles the party knows of
+        if (e.get("properties") or {}).get("event_type") != "conflict":
+            continue
+        x, y = proj(*e["geometry"]["coordinates"])
+        x += 16 * SS
+        y -= 16 * SS
+        half = emblems.SIZE["battle"] * SS * 0.5
+        box = (x - half, y - half, x + half, y + half)
+        marks.append({"x": x, "y": y, "emblem": "battle", "half": half, "state": "visited", "box": box, "group": []})
+        layout.reserve(box)
+    for m in marks:
+        if not m["group"]:
+            continue
+        head = m["group"][0]["properties"]
+        rest = [g["properties"] for g in m["group"][1:]]
+        x, y, half = m["x"], m["y"], m["half"]
+        bx0, by0, bx1, by1 = m["box"]  # labels go just outside the symbol's own box
+        seen = m["state"] == "visited"
+        big = head.get("kind") in ("capital", "city")
+        sk = max(m.get("scale", 1.0), 0.7 if big or m["here"] else 0.55)  # lettering shrinks on a crowded map too
+        font = _font(int((26 if big else 22 if seen else 19) * SS * sk), bold=big)
+        fill, gap = (INK if seen else FADED), 11 * SS  # clear of the symbol's box, halo and descenders included
+        layout.add(head["name"], font, [(x, by0 - gap, "ms"), (bx1 + gap, y, "lm"), (bx0 - gap, y, "rm"),
+                                        (x, by1 + gap, "mt")], fill, HALO)
+        below = by1
+        if rest:
+            names = [p["name"] + ("" if p["known"] == "visited" else " (heard of)") for p in rest[:3]]
+            text = " \u00b7 ".join(names) + (f" \u00b7 +{len(rest) - 3}" if len(rest) > 3 else "")
+            lab = layout.add(text, _font(int(16 * SS * max(sk, 0.75))), [(x, below + 20 * SS, "ms"), (bx1 + gap, y + 20 * SS, "lm"),
+                                                     (bx0 - gap, y + 20 * SS, "rm")], INK if seen else FADED, HALO)
+            if lab:
+                below = lab.box[3]
+        if m["here"]:
+            where = next(p["name"] for p in [head, *rest] if p.get("here"))
+            text = f"{party['name']} is here" + (f" ({where})" if where != head["name"] else "")
+            layout.add(text, _font(18 * SS, bold=True), [(x, below + 24 * SS, "ms"), (x, by0 - 34 * SS, "ms"),
+                                                         (bx1 + gap, y + 44 * SS, "lm")], (150, 88, 20), HALO)
+    return marks
+
+
+def _lay_out_regions(layout: "frame.Labels", proj: "Projection", known: dict[str, Any], provinces: dict[str, Any],
+                     realms_only: bool = False) -> None:
+    """Realm names, large and spaced across the provinces of theirs the party has been in (``realms_only``); or the
+    province names, each kept inside its province."""
+    realms: dict[str, list] = {}
+    for uid, p in known.items():
+        g = provinces.get(uid)
+        if g is None or not p.get("name"):
+            continue
+        seen = p["known"] == "visited"
+        if realms_only:
+            if seen and p.get("controller_name"):
+                realms.setdefault(p["controller_name"], []).append(g)
+            continue
+        x, y = proj(*g.representative_point().coords[0])
+        cands = [(x, y + dy * SS, "mm") for dy in (0, -30, 30, -60, 60)]
+        cands = [c for c in cands if g.contains(Point(*proj.inverse(c[0], c[1])))] or cands[:1]
+        layout.add(frame.spaced(p["name"]) if seen else p["name"], _font((17 if seen else 16) * SS, bold=seen), cands,
+                   (92, 66, 40) if seen else FADED, HALO)
+    for name, gs in realms.items():
+        g = unary_union(gs)
+        x0, x1 = proj(g.bounds[0], g.bounds[1])[0], proj(g.bounds[2], g.bounds[3])[0]
+        text = frame.spaced(name, gap=2)
+        px_size = min(28 * SS, 0.9 * abs(x1 - x0) / max(1, len(text)) * 1.6)
+        if px_size < 13 * SS:  # too small on this map to letter across
+            continue
+        x, y = proj(*g.representative_point().coords[0])
+        cands = [(x + dx * SS, y + dy * SS, "mm") for dx, dy in ((0, 0), (0, -70), (0, 70), (-120, 0), (120, 0), (0, -140), (0, 140))]
+        cands = [c for c in cands if g.contains(Point(*proj.inverse(c[0], c[1])))] or cands[:1]
+        layout.add(text, _font(int(px_size)), cands, (118, 84, 54, 150), (236, 226, 196, 90))
 
 
 class NothingKnown(ValueError):
@@ -208,6 +319,25 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     W, H = size[0] * SS, size[1] * SS
     proj = Projection(bounds, (W, H))
 
+    # ---- lettering and furniture, laid out first so the terrain symbols keep clear of them (#56)
+    inner = ((MARGIN + BAND) * SS, (MARGIN + BAND) * SS, W - (MARGIN + BAND) * SS, H - (MARGIN + BAND) * SS)
+    layout = frame.Labels((inner[0] + 6 * SS, inner[1] + 6 * SS, inner[2] - 6 * SS, inner[3] - 6 * SS), pad=3 * SS)
+    deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    layout.reserve(frame.compass(deco, inner[2] - 90 * SS, inner[1] + 100 * SS, 62 * SS, _font(28 * SS, True)))
+    layout.reserve(frame.cartouche(deco, inner[0] + 20 * SS, inner[3] - 24 * SS, st["atlas"]["name"],
+                                   f"As known to {party['name']} \u00b7 day {st['day']}", _font(40 * SS, True),
+                                   _font(20 * SS), SS))
+    layout.reserve(frame.scale_bar(deco, inner[2] - 24 * SS, inner[3] - 24 * SS, proj.km_per_px(), W * 0.12,
+                                   _font(16 * SS), SS))
+    marks = _lay_out_places(layout, proj, places, party, events=(st.get("events") or {}).get("features", []))
+    n_place_labels = len(layout.placed)
+    _lay_out_regions(layout, proj, known, provinces, realms_only=False)
+    # realm names: their own layer, large and faint under the rest; they avoid each other, the furniture and the
+    # province names, but may run under a town's name, as on old maps
+    realm_layout = frame.Labels(layout.bounds, pad=6 * SS,
+                                reserved=list(layout.reserved) + [l.box for l in layout.placed[n_place_labels:]])
+    _lay_out_regions(realm_layout, proj, known, provinces, realms_only=True)
+
     # ---- the world as drawn by a cartographer (atlas/cartography.py)
     seed = carto.seed_of(slug)
     view = box(-0.1 * W, -0.1 * H, 1.1 * W, 1.1 * H)
@@ -272,9 +402,10 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     for group, pts in road_lines:
         if group != "searoutes":
             adraw.line([tuple(q) for q in pts], fill=255, width=6 * SS)
-    for f in places:
-        x, y = proj(*f["geometry"]["coordinates"])
-        adraw.ellipse([x - 16 * SS, y - 16 * SS, x + 16 * SS, y + 16 * SS], fill=255)
+    for m in marks:
+        adraw.rectangle(m["box"], fill=255)
+    for lab in layout.placed:
+        adraw.rectangle(lab.box, fill=255)
     cells = _relief_px(proj, relief)
     if len(cells):
         symbols.draw(img, symbols.place(cells, cell, mask, avoid, SS * SYMBOL_SCALE, seed))
@@ -293,7 +424,6 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     carto.outline(draw, land, COAST + (255,), 2 * SS)  # the inked coast, lakes too
     if len(cells):
         symbols.cliffs(img, land, mask, _height_at(cells, cell), SS)
-    img = carto.parchment(img, seed)
 
     # ---- fog of war: soft-edged, over land and sea alike
     mask = Image.new("L", (W, H), FOG_UNKNOWN)
@@ -318,64 +448,35 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     fog = Image.new("RGBA", (W, H), FOG + (255,))
     fog.putalpha(mask)
     img.alpha_composite(fog)
+    img = carto.parchment(img, seed)  # aged together: the unexplored is just more of the same old paper
 
-    # ---- what the party knows, by name
-    draw = ImageDraw.Draw(img)
-    for uid, p in known.items():
-        g = provinces.get(uid)
-        if g is None or not p.get("name"):
-            continue
-        x, y = proj(*g.representative_point().coords[0])
-        if p["known"] == "visited":
-            _label(draw, (x, y), " ".join(p["name"].upper()), 24 * SS, fill=(92, 66, 40), bold=True)
-        else:
-            _label(draw, (x, y), p["name"], 22 * SS, fill=(200, 190, 170), halo=(30, 34, 44))
-    for group in _clusters([f for f in places if f["properties"].get("kind") != "continent"], proj, 40 * SS):
-        head, rest = group[0]["properties"], [g["properties"] for g in group[1:]]
-        x, y = proj(*group[0]["geometry"]["coordinates"])
-        visited = any(p["known"] == "visited" for p in [head, *rest])
-        r = (9 if head.get("kind") in ("capital", "city") else 7) * SS
-        if visited:
-            draw.ellipse([x - r, y - r, x + r, y + r], fill=(60, 40, 25), outline=(236, 226, 196), width=2 * SS)
-        else:
-            draw.ellipse([x - r, y - r, x + r, y + r], outline=(200, 190, 170), width=2 * SS)
-        _label(draw, (x, y - r - 6 * SS), head["name"], (24 if visited else 20) * SS,
-               fill=INK if visited else (210, 200, 180), halo=(236, 226, 196) if visited else (30, 34, 44))
-        ly = y + r + 26 * SS
-        for p in rest:  # buildings and districts in the same spot, listed under the town
-            seen_it = p["known"] == "visited"
-            _label(draw, (x, ly), p["name"] + ("" if seen_it else " (heard of)"), 18 * SS,
-                   fill=(70, 52, 32) if seen_it else (210, 200, 180), halo=(236, 226, 196) if seen_it else (30, 34, 44))
-            ly += 24 * SS
-        if any(p.get("here") for p in [head, *rest]):
-            R = 26 * SS
-            draw.ellipse([x - R, y - R, x + R, y + R], outline=(245, 199, 126), width=4 * SS)
-            where = next(p["name"] for p in [head, *rest] if p.get("here"))
-            _label(draw, (x, ly + 8 * SS), f"{party['name']} is here" + (f" ({where})" if where != head["name"] else ""),
-                   20 * SS, fill=(120, 70, 10))
-
-    # ---- cartouche, compass, scale bar
-    title = st["atlas"]["name"]
-    sub = f"As known to {party['name']} · day {st['day']}"
-    tw = max(draw.textlength(title, font=_font(40 * SS)), draw.textlength(sub, font=_font(22 * SS)))
-    bx, by = 40 * SS, H - 150 * SS
-    draw.rounded_rectangle([bx, by, bx + tw + 60 * SS, H - 40 * SS], radius=14 * SS, fill=(236, 226, 196, 235),
-                           outline=(120, 90, 50), width=3 * SS)
-    draw.text((bx + 30 * SS, by + 18 * SS), title, font=_font(40 * SS, True), fill=INK)
-    draw.text((bx + 30 * SS, by + 70 * SS), sub, font=_font(22 * SS), fill=(90, 70, 45))
-    cx, cy, cr = W - 110 * SS, 120 * SS, 50 * SS
-    draw.polygon([(cx, cy - cr), (cx + cr * 0.32, cy), (cx, cy + cr * 0.25), (cx - cr * 0.32, cy)],
-                 fill=(236, 226, 196), outline=(60, 45, 30), width=2 * SS)
-    draw.polygon([(cx, cy - cr), (cx + cr * 0.32, cy), (cx, cy + cr * 0.25)], fill=(140, 40, 30))
-    _label(draw, (cx, cy - cr - 10 * SS), "N", 30 * SS)
-    km = proj.km_per_px() * W * 0.14
-    nice = next((n for n in (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000) if n >= km * 0.6), 5000)
-    bar = nice / proj.km_per_px()
-    x0, y0 = W - 60 * SS - bar, H - 70 * SS
-    draw.rectangle([x0 - 16 * SS, y0 - 50 * SS, x0 + bar + 16 * SS, y0 + 24 * SS], fill=(236, 226, 196, 220))
-    draw.rectangle([x0, y0, x0 + bar / 2, y0 + 8 * SS], fill=INK)
-    draw.rectangle([x0 + bar / 2, y0, x0 + bar, y0 + 8 * SS], fill=(236, 226, 196), outline=INK, width=SS)
-    _label(draw, (x0 + bar / 2, y0 - 12 * SS), f"{nice:g} km", 20 * SS)
+    # ---- the places the party knows, as symbols (faded if only heard of), then every label
+    for state, alpha in (("visited", 255), ("heard", 140)):
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ld = ImageDraw.Draw(layer, "RGBA")
+        for m in marks:
+            if m["state"] != state:
+                continue
+            if m["emblem"]:
+                emblems.draw(ld, m["emblem"], m["x"], m["y"], SS * m.get("scale", 1.0))
+            else:
+                r = 4 * SS
+                ld.ellipse([m["x"] - r, m["y"] - r, m["x"] + r, m["y"] + r], fill=emblems.PAPER, outline=emblems.INK, width=SS)
+            if m.get("port"):
+                emblems.draw(ld, "anchor", m["x"] + m["half"] + 8 * SS * m.get("scale", 1.0), m["y"] + m["half"] * 0.4,
+                             SS * m.get("scale", 1.0))
+        if alpha < 255:
+            layer.putalpha(layer.getchannel("A").point(lambda v: v * alpha // 255))
+        img.alpha_composite(layer)
+    draw = ImageDraw.Draw(img, "RGBA")
+    for m in marks:
+        if m.get("here"):
+            R = m["half"] + 12 * SS
+            draw.ellipse([m["x"] - R, m["y"] - R, m["x"] + R, m["y"] + R], outline=(176, 110, 30, 255), width=3 * SS)
+    realm_layout.draw(img)
+    layout.draw(img)
+    frame.neatline(img, proj.inverse, MARGIN * SS, BAND * SS, SS)
+    img.alpha_composite(deco)
 
     out = img.resize(size, Image.LANCZOS).convert("RGB")
     buf = io.BytesIO()

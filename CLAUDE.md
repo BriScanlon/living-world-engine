@@ -110,6 +110,12 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
   at fixed pixel sizes (`SIZE`, `SPACING`; capped by `budget`), keeping off the `avoid` mask (rivers, roads, towns)
   and inside the land mask; `cliffs` and `crossings` add coast hachures and bridges/fords. The party map (symbols at `SYMBOL_SCALE` 0.6) builds the
   avoid mask, draws symbols, then rivers and roads over them. Unknown fog is alpha 253 so no ink shows through.
+- **Places and furniture** (#56): `emblems.emblem_for(kind, name)` (settlement rank, then type, then name keywords)
+  and `emblems.draw`; `frame.Labels` places text at the first candidate that overlaps nothing (placed labels and
+  `reserve`d boxes), else leaves it off. The party map lays out everything *before* drawing the world (so terrain
+  symbols avoid the lettering): furniture boxes, place symbols (`_lay_out_places`; only capitals, cities, landmarks
+  and the party's place reserve a box; symbol and font scale by median town spacing), province names, then realm
+  names on their own faint layer. Fog is parchment (`FOG`), aged together with the map; `neatline` paints the margin.
 - **Detailed coasts** (#62, `AzgaarWorld.layers(detail=True)`, setting `atlas_coast_detail`): `land.geojson` is the
   smoothed cell coast + midpoint-displacement detail (`cartography.detailed_coast`, km frame, seeded by map position,
   ~100 m segments, budget 70 points per land cell up to 400k), marked `properties.detail = "fractal"`; provinces and

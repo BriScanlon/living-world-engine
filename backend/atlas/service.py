@@ -257,6 +257,7 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
                                       "known": pv.places.get(loc["@id"]) if pv else None,
                                       "here": bool(pv) and pv.where == loc["@id"],
                                       "campaign": not loc.get("source_session", "").startswith("import/"),
+                                      "port": "port" in loc.get("tags", []),
                                       # where play begins: the wizard's start town, or the hand-built demo's town
                                       "start": "campaign-start" in loc.get("tags", [])
                                       or (loc.get("location_type") == "town"

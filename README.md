@@ -342,6 +342,15 @@ only what they know, on that branch and day.
   trees, heath, desert stipple and dunes, cracked wastes, ice, cliff hachures along high coasts, and bridges and
   fords where roads and trails cross rivers. They are placed from the relief layer at a fixed size (density follows
   area, not zoom), kept off water, roads, rivers and towns, drawn back to front, and hidden by the fog like the rest.
+* **Places, lettering and the frame** (#56, `backend/atlas/emblems.py`, `frame.py`): settlements are drawn by rank (a
+  castle for a capital, a walled city, a cluster of houses for a town, cottages for a village, an anchor at a port)
+  and landmarks by type or name (ruins, towers, temples and abbeys, barrows, standing stones, caves and mines,
+  lighthouses, inns, manors, crossed swords where a battle the party knows of was fought); buildings within 25 km
+  of a town are listed under it. Labels never overlap: the party's place first, then capitals, towns and provinces
+  (kept inside their province); realm names are lettered large, spaced and faint across their land. On a crowded
+  map symbols and lettering shrink to fit. A double-ruled frame with a graticule border, a compass rose, a scroll
+  cartouche and a scale bar in km and miles finish it; the unknown is blank, unexplored parchment (places only
+  heard of drawn faded) and the terrain symbols keep clear of the lettering.
 * **Coastlines with detail as you zoom in** (#62): on import the coast loses its cell zigzag and gains fractal coves
   and headlands down to ~100 m (rougher on high, rocky coasts; lake shores too), so the globe shows more of them the
   closer you look (the tiles carry what each zoom can show) and the party and zoom-in maps use the same coast. Towns
