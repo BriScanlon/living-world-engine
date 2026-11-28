@@ -50,9 +50,10 @@ def test_the_climate_answer_moves_the_region_and_its_biomes():
     north = generate(5, climate="northern", **REGION_SIZES["small"])
     tropic = generate(5, climate="tropical", **REGION_SIZES["small"])
     assert north["mapCoordinates"]["latS"] > 40 and abs(tropic["mapCoordinates"]["latN"]) < 25
-    biomes = lambda w: {c["biome"] for c in w["pack"]["cells"] if c["h"] >= 20}  # noqa: E731
+    biomes = lambda w, top=101: {c["biome"] for c in w["pack"]["cells"] if 20 <= c["h"] < top}  # noqa: E731
     assert biomes(north) & {9, 10, 11} and not biomes(north) & {1, 3, 5, 7}   # taiga, tundra; no desert or jungle
-    assert biomes(tropic) & {1, 3, 5, 7} and not biomes(tropic) & {9, 10, 11}
+    # tropical lowlands: no taiga or tundra (high peaks can carry ice, as real ones do: #41's altitude cooling)
+    assert biomes(tropic) & {1, 3, 5, 7} and not biomes(tropic, top=40) & {9, 10, 11}
 
 
 def test_planet_mode_is_unchanged():

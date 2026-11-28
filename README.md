@@ -235,7 +235,11 @@ coasts drawn by fractal noise. *Continents* gives two or three landmasses with o
 great landmass, *islands* and *archipelago* many islands; land share follows the shape. Water drains properly: basins
 are filled or become lakes, every cell flows to its lowest neighbour, and rivers (40-odd on a medium continent, with
 tributaries) run downhill to the sea or a lake. Coastal cells get a harbour rating (sheltered coves, river mouths)
-for ports. A medium region generates in about half a second.
+for ports. Climate follows the region's latitude and land: it cools toward the poles and up mountains, prevailing
+winds (trade winds, westerlies) carry sea air inland and rain it out on the way up a range, leaving a rain shadow
+beyond, and the rain feeds the rivers. Biomes come from temperature and rain (a temperate region gets forests on
+its wet coasts and grassland or steppe in the lee of its mountains, a tropical one savanna, rainforest and desert,
+with ice only on its highest peaks). A medium region generates in about half a second.
 
 **Your own maps.** *Map source: Use my Azgaar export* uploads a Full JSON from Azgaar's Fantasy Map Generator,
 which runs **self-hosted** as the `fmg` service (http://localhost:8070, a pinned upstream tag; see
