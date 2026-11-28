@@ -117,6 +117,18 @@ def upload_dir() -> Path:
     return p
 
 
+def _uploaded_map_name(world: dict[str, Any]) -> str | None:
+    """An uploaded Azgaar map's own name, so an unnamed world is called what the DM called it in Azgaar."""
+    if world.get("source") != "azgaar" or not world.get("upload_id"):
+        return None
+    try:
+        raw = json.loads((upload_dir() / f"{world['upload_id']}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    name = (raw.get("info", {}).get("mapName") or raw.get("settings", {}).get("mapName") or "").strip()
+    return name or None
+
+
 # =========================================================================== the build
 def build_world(answers: dict[str, Any], emit: Callable[..., None] | None = None) -> dict[str, Any]:
     """Build a new campaign world. The DM's homebrew library is layered over the SRD for the whole build (creatures in
@@ -138,7 +150,8 @@ def _build_world(answers: dict[str, Any], emit: Callable[..., None] | None, hb_e
     seed = int(a["world"].get("seed") or random.randrange(1, 10**9))
     rng = random.Random(seed)
     namer = Namer(rng)
-    name = (a["world"].get("name") or "").strip() or rng.choice(S.spec()["rolls"]["world_name"])
+    name = (a["world"].get("name") or "").strip() or _uploaded_map_name(a["world"]) or \
+        rng.choice(S.spec()["rolls"]["world_name"])
     slug = f"{slugify(name)}-{seed % 10000}"
     db = ("campaign_" + slug.replace("-", "_"))[:60]
     root_store = get_store()

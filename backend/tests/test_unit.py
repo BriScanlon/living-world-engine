@@ -120,3 +120,28 @@ def test_session_numbers_come_from_session_names_only():
     assert session_number("import/azgaar-region-trial-3433") is None
     assert session_number("setup/kingdoms") is None and session_number("vtt/main") is None
     assert session_number("ingest/2026-11-27-recap") is None
+
+
+def test_the_wizard_links_to_the_self_hosted_map_generator(monkeypatch):
+    from api.routes import wizard_spec
+    from config import get_settings
+    monkeypatch.setenv("FMG_PORT", "8070")
+    get_settings.cache_clear()
+    try:
+        assert wizard_spec()["fmg_port"] == 8070
+        monkeypatch.delenv("FMG_PORT")
+        get_settings.cache_clear()
+        assert wizard_spec()["fmg_port"] is None  # not running: no link
+    finally:
+        get_settings.cache_clear()
+
+
+def test_an_unnamed_world_from_an_azgaar_upload_takes_the_maps_name(tmp_path, monkeypatch):
+    import json as _json
+
+    from wizard import builder
+    monkeypatch.setattr(builder, "upload_dir", lambda: tmp_path)
+    (tmp_path / "abc.json").write_text(_json.dumps({"info": {"mapName": "Khorok"}, "pack": {}}), encoding="utf-8")
+    assert builder._uploaded_map_name({"source": "azgaar", "upload_id": "abc"}) == "Khorok"
+    assert builder._uploaded_map_name({"source": "generate", "upload_id": "abc"}) is None
+    assert builder._uploaded_map_name({"source": "azgaar", "upload_id": "missing"}) is None

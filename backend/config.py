@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     # Virtual tabletop (vtt/): where the world engine sends maps and scenes. Empty = not linked.
     vtt_url: str = ""
+    # The self-hosted Azgaar Fantasy Map Generator's port (fmg/), linked from the wizard; empty = not running
+    fmg_port: int | None = None
     vtt_timeout_seconds: float = 10.0
 
 

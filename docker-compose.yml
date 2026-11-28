@@ -32,6 +32,8 @@ services:
       TERMINUSDB_PASS: ${TERMINUSDB_ADMIN_PASS:-root}
       # The virtual tabletop, reached over the compose network
       VTT_URL: http://vtt:8000
+      # The self-hosted map generator's port, so the wizard can link to it on whatever host you opened
+      FMG_PORT: ${FMG_PORT:-8070}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -88,6 +90,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  # Azgaar's Fantasy Map Generator (MIT), self-hosted: make and edit worlds, then Export > JSON > Full and upload
+  # them in the wizard. Pinned upstream tag; see fmg/README.md
+  fmg:
+    build:
+      context: ./fmg
+      args:
+        FMG_REF: ${FMG_REF:-v1.157.0}
+    ports:
+      - "${FMG_PORT:-8070}:80"
     restart: unless-stopped
 
 volumes:

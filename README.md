@@ -35,6 +35,7 @@ docker compose up --build
 | DM dashboard | http://localhost:5173 |
 | Backend API (OpenAPI docs) | http://localhost:8000/docs |
 | Virtual tabletop: DM screen · player table | http://localhost:8080/dm · http://localhost:8080/table |
+| Map generator (self-hosted Azgaar, MIT) | http://localhost:8070 |
 | TerminusDB dashboard (admin / `root`; this machine only) | http://localhost:6363 |
 
 On first start the backend creates the `living_world` database, applies the schema and seeds
@@ -233,6 +234,12 @@ about a minute and a half. Mock mode leaves the templates alone.
 coasts drawn by fractal noise. *Continents* gives two or three landmasses with open sea between them, *pangea* one
 great landmass, *islands* and *archipelago* many islands; land share follows the shape. A medium region generates
 in about half a second.
+
+**Your own maps.** *Map source: Use my Azgaar export* uploads a Full JSON from Azgaar's Fantasy Map Generator,
+which runs **self-hosted** as the `fmg` service (http://localhost:8070, a pinned upstream tag; see
+[fmg/README.md](fmg/README.md)); the wizard links to it. Make it a region rather than a planet (*Map size*,
+*Burgs number*): Azgaar's default map spans the globe with ~900 burgs, the same year-long journeys and too many
+documents for the engine.
 
 **Scale.** A generated world is a region, not a planet: provinces of about 20,000 km² (10–40k), towns 45–65 km
 apart (a day or two on foot), highways between neighbouring capitals (one to three weeks), up to 100 / 200 / 320

@@ -600,7 +600,7 @@ def campaign_delete(campaign_id: str) -> dict[str, Any]:
 @router.get("/wizard/spec")
 def wizard_spec() -> dict[str, Any]:
     from wizard.spec import spec
-    return spec()
+    return {**spec(), "fmg_port": get_settings().fmg_port}
 
 
 @router.post("/wizard/upload")
