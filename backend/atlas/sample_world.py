@@ -551,7 +551,21 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
 
 
 def write_sample(path: str | Path, seed: int = 1795) -> Path:
+    """The old whole-planet sample (tests, and scripts that ask for it)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(generate(seed)), encoding="utf-8")
+    return p
+
+
+# The first-run demo map: a medium temperate region of continents, natively generated (#44); Greywater is placed
+# on one of its ports. Same name and slug as the old planet, so links and docs keep working.
+DEMO_REGION = {"name": "Thessaly Reach", "region_km": (2500, 1600), "cell_km": 20.0, "max_towns": 200,
+               "mesh": "voronoi", "climate": "temperate", "land": "continents", "n_states": 7}
+
+
+def write_demo_region(path: str | Path, seed: int = 1795) -> Path:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(generate(seed, **DEMO_REGION)), encoding="utf-8")
     return p

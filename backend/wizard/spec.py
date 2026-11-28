@@ -127,7 +127,7 @@ def spec() -> dict[str, Any]:
                  "options": {"small": "Small region (~1,500 km across)", "medium": "Medium region (~2,500 km)",
                              "large": "Large region (~4,000 km, a continent)"}},
                 {"key": "source", "label": "Map source", "type": "select",
-                 "options": {"generate": "Generate a planet", "azgaar": "Use my Azgaar export (Full JSON)"}},
+                 "options": {"generate": "Generate a region", "azgaar": "Use my Azgaar export (Full JSON)"}},
                 {"key": "lore", "label": "One-line pitch", "type": "text"},
             ]},
             "continents": {"title": "Continents", "guide": "Continents and geography", "fields": [

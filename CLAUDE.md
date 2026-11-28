@@ -60,8 +60,9 @@ vtt/        backend/app/{main.py (routes + /ws), state.py (TableService: table s
             session log), tokens.py, db.py (SQLite), hub.py (WS fan-out by role), pipeline/ (jobs, flows, comfy, llm)}
             frontend/src/{table/TablePage.tsx, dm/*.tsx panels, components/*Layer|Canvas, lib/sync.ts (WS state)}
 scripts/    seed_demo_world.py, import_azgaar.py, build_srd_catalogue.py, llm_smoke.py (each LLM call once),
-            forecast_check.py (a whole forecast on the real model, timed per step and per call type)
-docs/       azgaar-field-guide.md (how to make/export an Azgaar world)
+            forecast_check.py (a whole forecast on the real model, timed per step and per call type),
+            move_demo_to_region.py (move an existing demo off the old planet map)
+docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen.md (native generation, knobs)
 ```
 
 ## Core model and invariants (break these and things go subtly wrong)
@@ -167,7 +168,7 @@ target, or once it's held (`capped_goal_progress`): off-screen ticks stop one se
 ## Running and testing
 
 ```bash
-docker compose up --build                       # everything, mock mode, Greywater + sample planet on first start
+docker compose up --build                       # everything, mock mode, Greywater + the demo region on first start
 cd backend && python -m pytest -q               # 113 tests; needs TerminusDB on :6363 (integration ones skip otherwise)
 cd vtt/backend && python -m pytest -q           # 13 tests, self-contained (temp DATA_DIR, mock pipeline)
 cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; `npm run build` for the VTT dist
@@ -211,9 +212,9 @@ cd frontend && npx tsc --noEmit -p .            # and the same in vtt/frontend; 
   loading" crash; reload the page.
 - MapLibre GeoJSON sources fetch in a worker: use absolute URLs (`location.origin + …`).
 - Git Bash rewrites `/app/...` in `docker compose exec backend python /app/...`: prefix `MSYS_NO_PATHCONV=1`.
-- The **demo** sample planet (*Thessaly Reach*, `generate(seed)` planet mode) is coarse (~20 India-sized provinces),
-  so trips there take months. Wizard worlds are **regions** (`generate(..., region_km=, cell_km=, max_towns=)`,
-  `wizard.builder.REGION_SIZES`): ~20k km2 provinces, towns a day or two apart. Native world generation is epic #45.
+- Generated worlds (wizard and the demo, `DEMO_REGION`) are **regions** (`generate(..., region_km=, cell_km=,
+  max_towns=, mesh="voronoi")`): ~20k km2 provinces, towns a day or two apart. `generate(seed)` with no region is the
+  old hex **planet** (coarse, India-sized provinces), kept only for older tests; its output must stay byte-identical.
 - `atlas_state(day=None)` means "max day on the branch", so ended facts drop out.
 
 ## Conventions
@@ -240,7 +241,10 @@ Real model: forecasts run end to end on the GPU PC (`qwen3.8:27b-24k`, flash att
 (a live run resumed twice), #24 (arbiter context; grouped arbiter calls), #30 (goal clocks handing over lost
 conquests), #31 (diplomacy timed as army marches).
 
-Backlog: epic: native world generation instead of Azgaar.
+Native world generation (epic #45) is done: phases #38-#44, `backend/atlas/worldgen/`, `docs/worldgen.md`. Wizard
+worlds and the first-run demo are generated regions; the demo moved there with `scripts/move_demo_to_region.py`.
+
+Backlog: none open. Ideas: villages as an atlas-only tile layer, a coarse rest-of-world around the region.
 Done since: the homebrew catalogue epic (library, overlay, wizard, editor); battle strength from challenge ratings;
 "Open in VTT" from the briefing (`place` on each event/rumor, `to-table` with `mark_visited: false`); LLM-written
 wizard prose (`wizard/prose.py`); globe labels as symbol layers with bundled glyphs (`frontend/public/fonts`); ingestion links to the catalogue
