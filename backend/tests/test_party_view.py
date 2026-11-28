@@ -152,6 +152,19 @@ def test_party_map_letters_only_what_the_party_knows(world, monkeypatch):
     known = {f["properties"]["name"] for f in st["places"]["features"]}
     known |= {p["name"] for p in st["provinces"].values() if p.get("known") and p.get("name")}
     known |= {p["controller_name"] for p in st["provinces"].values() if p.get("known") and p.get("controller_name")}
+    # waters: only those touching the provinces the party knows (#57)
+    from shapely.geometry import shape
+    from shapely.ops import unary_union
+
+    from atlas.service import atlas_path
+    slug = st["atlas"]["slug"]
+    prov = {f["properties"]["pid"]: shape(f["geometry"])
+            for f in json.loads((atlas_path(slug) / "provinces.geojson").read_text())["features"]}
+    near = unary_union([g for pid, g in prov.items() if (st["provinces"].get(pid) or {}).get("known")]).buffer(2)
+    waters_file = atlas_path(slug) / "waters.geojson"
+    if waters_file.exists():
+        known |= {f["properties"]["name"] for f in json.loads(waters_file.read_text())["features"]
+                  if shape(f["geometry"]).intersects(near)}
     plain = lambda s: "".join(s.split()).lower()  # noqa: E731  (spaced capitals compare as plain words)
     names = {plain(n) for n in known}
     assert lettered

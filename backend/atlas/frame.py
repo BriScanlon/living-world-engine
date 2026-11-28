@@ -23,6 +23,7 @@ class Label:
     fill: tuple
     halo: tuple
     box: tuple[float, float, float, float]
+    italic: bool = False
 
 
 @dataclass
@@ -47,13 +48,16 @@ class Labels:
         return not any(b[0] < o[2] + p and b[2] + p > o[0] and b[1] < o[3] + p and b[3] + p > o[1]
                        for o in [*(l.box for l in self.placed), *self.reserved])
 
-    def add(self, text: str, font, candidates: list[tuple[float, float, str]], fill, halo) -> Label | None:
+    def add(self, text: str, font, candidates: list[tuple[float, float, str]], fill, halo,
+            italic: bool = False) -> Label | None:
         """The first candidate (x, y, anchor) where ``text`` fits, or None (then it is left off)."""
         stroke = max(2, getattr(font, "size", 16) // 8)
         for x, y, anchor in candidates:
             b = self.box(text, font, (x, y), anchor, stroke)
+            if italic:  # the slant leans the top right
+                b = (b[0], b[1], b[2] + SLANT * (b[3] - b[1]), b[3])
             if self.free(b):
-                lab = Label(text, font, (x, y), anchor, fill, halo, b)
+                lab = Label(text, font, (x, y), anchor, fill, halo, b, italic)
                 self.placed.append(lab)
                 return lab
         return None
@@ -64,8 +68,25 @@ class Labels:
     def draw(self, img: Image.Image) -> None:
         d = ImageDraw.Draw(img, "RGBA")
         for l in self.placed:
-            d.text(l.xy, l.text, font=l.font, fill=l.fill, anchor=l.anchor,
-                   stroke_width=max(2, getattr(l.font, "size", 16) // 8), stroke_fill=l.halo)
+            stroke = max(2, getattr(l.font, "size", 16) // 8)
+            if l.italic:
+                _slanted(img, l, stroke)
+            else:
+                d.text(l.xy, l.text, font=l.font, fill=l.fill, anchor=l.anchor, stroke_width=stroke, stroke_fill=l.halo)
+
+
+SLANT = 0.22  # how far italic lettering leans (DejaVu Serif has no italic face, so the text is sheared)
+
+
+def _slanted(img: Image.Image, l: Label, stroke: int) -> None:
+    x0, y0, x1, y1 = (int(v) for v in l.box)
+    w, h = x1 - x0 + 4, y1 - y0 + 4
+    tile = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(tile).text((l.xy[0] - x0 + 2, l.xy[1] - y0 + 2), l.text, font=l.font, fill=l.fill, anchor=l.anchor,
+                              stroke_width=stroke, stroke_fill=l.halo)
+    # x' = x + SLANT * (h - y): the bottom stays put, the top leans right
+    tile = tile.transform((w, h), Image.AFFINE, (1, SLANT, -SLANT * h, 0, 1, 0), resample=Image.BICUBIC)
+    img.alpha_composite(tile, (max(0, x0 - 2), max(0, y0 - 2)))
 
 
 def spaced(text: str, gap: int = 1) -> str:

@@ -351,6 +351,11 @@ only what they know, on that branch and day.
   map symbols and lettering shrink to fit. A double-ruled frame with a graticule border, a compass rose, a scroll
   cartouche and a scale bar in km and miles finish it; the unknown is blank, unexplored parchment (places only
   heard of drawn faded) and the terrain symbols keep clear of the lettering.
+* **Named waters** (#57, `backend/atlas/waters.py`): on import the open sea, its gulfs, bays and straits (water that a
+  morphological opening separates from the open sea; a strait meets it twice) and lakes are found and named from the
+  land around them (*the Thessaly Sea*, *the Mordra Strait*, *the Bay of Brinstead*, *Lake Holmford*) into
+  `waters.geojson`. The party map letters the waters the party knows in slanted, spaced sea-blue capitals, on the
+  stretch it knows and sized to the room there.
 * **Coastlines with detail as you zoom in** (#62): on import the coast loses its cell zigzag and gains fractal coves
   and headlands down to ~100 m (rougher on high, rocky coasts; lake shores too), so the globe shows more of them the
   closer you look (the tiles carry what each zoom can show) and the party and zoom-in maps use the same coast. Towns

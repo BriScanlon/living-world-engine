@@ -149,6 +149,55 @@ def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dic
     return marks
 
 
+WATER_INK, WATER_HALO = (52, 86, 110, 255), (200, 220, 224, 170)
+
+
+def known_waters(waters: list[dict[str, Any]], known_area, min_share: float = 0.002) -> list[tuple[dict[str, Any], Any]]:
+    """The named waters the party can name, each with the part of it the party knows (seen or heard of): a cartographer
+    letters the stretch of sea you know, not its far middle."""
+    if known_area is None or known_area.is_empty:
+        return []
+    out = []
+    for w in waters:
+        g = shape(w["geometry"]).buffer(0)
+        if g.geom_type == "Point":  # older layers kept only the label point
+            if known_area.contains(g):
+                out.append((w, g))
+            continue
+        part = g.intersection(known_area)
+        if not part.is_empty and part.area >= min_share * known_area.area:
+            out.append((w, part))
+    return out
+
+
+def _lay_out_waters(layout: "frame.Labels", proj: "Projection", waters: list[dict[str, Any]], known_area) -> None:
+    """Sea, gulf, bay and strait names in slanted, spaced sea-blue capitals (lakes in plain slanted letters), sized
+    to the room the water has, biggest first."""
+    from shapely.ops import polylabel
+    for w, part in sorted(known_waters(waters, known_area), key=lambda wp: -(wp[0]["properties"].get("area_km2") or 0)):
+        p = w["properties"]
+        room_deg = None
+        if part.geom_type == "Point":
+            at = part
+        else:
+            big = max(carto.polys(part), key=lambda q: q.area)
+            at = polylabel(big, tolerance=0.01)
+            # the room the known stretch gives: across it, at most a few times its depth at the label point
+            room_deg = min(big.bounds[2] - big.bounds[0], 5 * at.distance(big.exterior))
+        x, y = proj(at.x, at.y)
+        lake = p.get("kind") == "lake"
+        text = p["name"] if lake else frame.spaced(p["name"])
+        room = (p.get("width_km") or 50) / proj.km_per_px()
+        if room_deg is not None:
+            room = min(room, proj(at.x + room_deg, at.y)[0] - x)
+        cap = (30 if p.get("kind") == "sea" else 22) * SS
+        size = int(min(cap, room / max(1, len(text)) * 1.5))
+        if size < 12 * SS:  # no room to letter it legibly here
+            continue
+        layout.add(text, _font(size), [(x, y + dy * SS, "mm") for dy in (0, -36, 36, -72, 72)], WATER_INK, WATER_HALO,
+                   italic=True)
+
+
 def _lay_out_regions(layout: "frame.Labels", proj: "Projection", known: dict[str, Any], provinces: dict[str, Any],
                      realms_only: bool = False) -> None:
     """Realm names, large and spaced across the provinces of theirs the party has been in (``realms_only``); or the
@@ -332,6 +381,8 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     marks = _lay_out_places(layout, proj, places, party, events=(st.get("events") or {}).get("features", []))
     n_place_labels = len(layout.placed)
     _lay_out_regions(layout, proj, known, provinces, realms_only=False)
+    known_area = unary_union(seen + heard).buffer(0.25 * pad) if (seen or heard) else None
+    _lay_out_waters(layout, proj, _features(slug, "waters"), known_area)
     # realm names: their own layer, large and faint under the rest; they avoid each other, the furniture and the
     # province names, but may run under a town's name, as on old maps
     realm_layout = frame.Labels(layout.bounds, pad=6 * SS,
