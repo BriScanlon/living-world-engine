@@ -186,9 +186,16 @@ class AzgaarWorld:
             lon, lat = self.lonlat(*c["p"])
             relief.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 4), round(lat, 4)]},
                            "properties": {"h": int(c.get("h", 0)), "b": int(c.get("biome", 0))}})
+        # named waters: the sea, its gulfs, bays and straits, and lakes (#57)
+        from atlas.waters import find_waters
+        waters = find_waters(coast.simplify(0.02), self.bbox(), map_name=self.raw.get("info", {}).get("mapName") or self.name,
+                             towns=[(bg.get("name", ""), *self.lonlat(bg["x"], bg["y"]), bool(bg.get("capital")))
+                                    for bg in burg_list if bg.get("name")],
+                             provinces=[(f["properties"]["name"], prov_geom[f["properties"]["azgaar_id"]])
+                                        for f in prov_feats if f["properties"].get("name")])
         fc = lambda feats: {"type": "FeatureCollection", "features": feats}  # noqa: E731
         return {
-            "relief": fc(relief),
+            "relief": fc(relief), "waters": fc(waters),
             "land": fc([{"type": "Feature", "geometry": mapping(coast), "properties": land_props}]),
             "biomes": fc(biome_feats), "provinces": fc(prov_feats),
             "rivers": fc(rivers), "roads": fc(roads), "burgs": fc(burgs),

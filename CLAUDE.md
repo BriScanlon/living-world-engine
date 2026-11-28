@@ -116,6 +116,11 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
   symbols avoid the lettering): furniture boxes, place symbols (`_lay_out_places`; only capitals, cities, landmarks
   and the party's place reserve a box; symbol and font scale by median town spacing), province names, then realm
   names on their own faint layer. Fog is parchment (`FOG`), aged together with the map; `neatline` paints the margin.
+- **Named waters** (#57, `atlas/waters.py: find_waters`, run in `AzgaarWorld.layers` on the coast simplified to
+  0.02 deg): opening radius `R = 4%` of the map's short side; layer `waters.geojson` holds each water's simplified
+  shape with `name`, `kind`, `label` (polylabel) and `width_km`; not tiled, not in the WorldAtlas layer list. The party
+  map letters a water on the part of it inside the known area (`known_waters`), slanted (`frame.SLANT`, a shear:
+  DejaVu Serif has no italic face).
 - **Detailed coasts** (#62, `AzgaarWorld.layers(detail=True)`, setting `atlas_coast_detail`): `land.geojson` is the
   smoothed cell coast + midpoint-displacement detail (`cartography.detailed_coast`, km frame, seeded by map position,
   ~100 m segments, budget 70 points per land cell up to 400k), marked `properties.detail = "fractal"`; provinces and
