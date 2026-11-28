@@ -112,6 +112,15 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     while len(religion_list) < n_religions:
         religion_list = religion_list + [(f"Cult of {_name(rng, len(religion_list), 2)}", "Cult")]
 
+    if region:
+        lat0 = REGION_LATITUDE.get(climate, REGION_LATITUDE["whole-world"])
+        lat_t = hkm / KM_PER_DEG_LAT
+        lon_t = wkm / (KM_PER_DEG_LAT * math.cos(math.radians(lat0)))
+        coords = {"latT": round(lat_t, 4), "latN": round(lat0 + lat_t / 2, 4), "latS": round(lat0 - lat_t / 2, 4),
+                  "lonT": round(lon_t, 4), "lonW": round(-lon_t / 2, 4), "lonE": round(lon_t / 2, 4)}
+    else:
+        coords = {**CLIMATES.get(climate, CLIMATES["whole-world"]), "lonT": 300, "lonW": -150, "lonE": 150}
+
     if mesh == "voronoi":
         import numpy as np
 
@@ -179,8 +188,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
         from atlas.worldgen import water as wg_water
         frame = lambda x, y: x <= 0.01 or y <= 0.01 or x >= width - 0.01 or y >= height - 0.01  # noqa: E731
         edge = [any(frame(*vpos[v]) for v in cell_v[i]) for i in range(n)]
-        hydro = wg_water.hydrology(h, nbrs, edge)
+        # climate: temperature from latitude and height, rain carried by prevailing winds, rain shadows (#41)
+        from atlas.worldgen import climate as wg_climate
+        cell_lat = wg_climate.latitude_of(centers, height, coords["latN"], coords["latT"])
+        rain = wg_climate.precipitation(centers, nbrs, h, cell_lat)
+        hydro = wg_water.hydrology(h, nbrs, edge, precip=[float(x) for x in rain])
         h = hydro.h
+        temp = wg_climate.temperature(cell_lat, np.asarray(h, dtype=float))
     else:
         # ------------------------------------------------------------------ heightmap
         raw = []
@@ -194,19 +208,11 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     land = [x >= 20 for x in h]
 
     # ------------------------------------------------------------------ biomes
-    if region:
-        lat0 = REGION_LATITUDE.get(climate, REGION_LATITUDE["whole-world"])
-        lat_t = hkm / KM_PER_DEG_LAT
-        lon_t = wkm / (KM_PER_DEG_LAT * math.cos(math.radians(lat0)))
-        coords = {"latT": round(lat_t, 4), "latN": round(lat0 + lat_t / 2, 4), "latS": round(lat0 - lat_t / 2, 4),
-                  "lonT": round(lon_t, 4), "lonW": round(-lon_t / 2, 4), "lonE": round(lon_t / 2, 4)}
-    else:
-        coords = {**CLIMATES.get(climate, CLIMATES["whole-world"]), "lonT": 300, "lonW": -150, "lonE": 150}
     # degrees of latitude per degree of mean annual cooling: a region at 45 degrees is temperate, not taiga
     lat_cooling = 0.45 if region else 0.6
     moist = [noise(width - x, height - y) for (x, y) in centers]
-    biome = []
-    for i, (x, y) in enumerate(centers):
+    biome = wg_climate.biomes(temp, rain, h, hydro.flux) if mesh == "voronoi" else []
+    for i, (x, y) in enumerate(centers if mesh != "voronoi" else []):
         if not land[i]:
             biome.append(0)
             continue
