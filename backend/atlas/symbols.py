@@ -34,7 +34,7 @@ FOREST = {5: "jungle", 6: "broadleaf", 7: "jungle", 8: "mixed", 9: "pine"}
 GROUND = {1: "desert", 2: "waste", 3: "savanna", 4: "plains", 10: "heath", 11: "ice", 12: "marsh"}
 
 # per kind: symbol size and spacing (both in base pixels, scaled by the renderer's supersampling)
-SIZE = {"mountain": 24, "hill": 14, "downs": 16, "broadleaf": 8, "pine": 10, "jungle": 8, "palm": 11, "mixed": 8,
+SIZE = {"mountain": 18, "hill": 14, "downs": 16, "broadleaf": 8, "pine": 10, "jungle": 8, "palm": 11, "mixed": 8,
         "marsh": 9, "plains": 8, "savanna": 10, "heath": 7, "desert": 8, "dune": 10, "waste": 9, "ice": 10}
 # mountains overlap into chains and trees pack into dense woods
 SPACING = {"mountain": 0.55, "hill": 0.75, "downs": 1.4, "broadleaf": 0.5, "pine": 0.5, "jungle": 0.45,
