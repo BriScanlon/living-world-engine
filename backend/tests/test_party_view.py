@@ -231,3 +231,33 @@ def test_the_table_keeps_the_style_it_was_put_up_in(world, monkeypatch):
     monkeypatch.setattr(party_map, "to_table", lambda store, branch, day, style=None: calls.append(style) or {})
     assert party_map.refresh_if_shown(world)
     assert calls == ["ink"]
+
+
+def test_far_out_only_the_main_names():
+    """#57 follow-up: a crowded, far-out map names the capital and the party's place, not every town; with room,
+    every town is named."""
+    from atlas import frame, party_map
+
+    class Flat:  # degrees straight to pixels
+        def __init__(self, k):
+            self.k = k
+
+        def __call__(self, lon, lat):
+            return lon * self.k, lat * self.k
+
+    def place(name, kind, x, y, here=False):
+        return {"geometry": {"coordinates": [x, y]},
+                "properties": {"name": name, "kind": kind, "known": "visited", "here": here}}
+    places = [place("Capitol", "capital", 50, 50)] + [place(f"Town{i}{j}", "town", 10 + i * 9, 10 + j * 9)
+                                                    for i in range(9) for j in range(9) if (i, j) != (4, 4)]
+    places.append(place("Hometown", "town", 91, 91, here=True))
+    party = {"name": "The Company"}
+    for k, expect_towns in ((2.0, False), (20.0, True)):  # crowded (towns ~18 px apart), then roomy (~180 px)
+        proj = Flat(k)
+        lay = frame.Labels((-1e6, -1e6, 1e6, 1e6), pad=1)
+        near = party_map.closeness(places, proj)
+        party_map._lay_out_places(lay, proj, places, party, near=near)
+        names = {l.text for l in lay.placed}
+        assert "Capitol" in names and "Hometown" in names
+        towns = {n for n in names if n.startswith("Town")}
+        assert (len(towns) > 70) if expect_towns else not towns, (k, near, len(towns))

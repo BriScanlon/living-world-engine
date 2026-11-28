@@ -29,6 +29,13 @@ TILE = 512  # pixels served per tile (shown as 256 css px: crisp on high-density
 RENDER = 2  # drawn at twice that, then scaled down: anti-aliasing
 SS = 4.0  # line and symbol scale while drawing (= the party map's look at the size shown)
 MIN_ZOOM, MAX_ZOOM = 3, 11
+TOWN_SYMBOLS_FROM = 7  # towns drawn from this zoom; capitals always
+VERSION = "v2"  # bump when the drawing changes: older cached tiles are left behind
+
+
+def terrain_density(z: int) -> float:
+    """Fewer terrain symbols far out (a whole region at z5 shows about half), the full density from z8."""
+    return min(1.0, max(0.3, 0.3 + 0.175 * (z - 4)))
 
 
 class MercatorTile:
@@ -90,7 +97,7 @@ def render_tile(slug: str, z: int, x: int, y: int, style: str = "colour") -> byt
     """One parchment tile as WebP (transparent outside the world's region), cached on disk."""
     from atlas.party_map import STYLES, draw_world
     style = style if style in STYLES else "colour"
-    out = cache_dir(slug) / style / str(z) / str(x) / f"{y}.webp"
+    out = cache_dir(slug) / VERSION / style / str(z) / str(x) / f"{y}.webp"
     if out.exists():
         return out.read_bytes()
     land_file = atlas_path(slug) / "land.geojson"
@@ -108,7 +115,7 @@ def render_tile(slug: str, z: int, x: int, y: int, style: str = "colour") -> byt
         proj = MercatorTile(z, x, y, T, margin)
         W = H = T + 2 * margin
         band = int(60 * SS)
-        towns = [(c, p) for c, p in reg["burgs"] if p.get("capital") or z >= 6]
+        towns = [(c, p) for c, p in reg["burgs"] if p.get("capital") or z >= TOWN_SYMBOLS_FROM]
         avoid = []
         marks = []
         for c, p in towns:
@@ -121,7 +128,8 @@ def render_tile(slug: str, z: int, x: int, y: int, style: str = "colour") -> byt
                 marks.append((emblem, px_, py_, k, p.get("port")))
         img, *_ = draw_world(proj, W, H, slug, STYLES[style], carto.seed_of(slug), SS,
                              provinces=reg["provinces"], avoid_boxes=avoid, cell_px=cell_px, budget=10 ** 7,
-                             wobble=False, keep=(margin - band, margin - band, margin + T + band, margin + T + band))
+                             wobble=False, keep=(margin - band, margin - band, margin + T + band, margin + T + band),
+                             density=terrain_density(z))
         d = ImageDraw.Draw(img, "RGBA")
         for emblem, px_, py_, k, port in marks:
             emblems.draw(d, emblem, px_, py_, SS * k)

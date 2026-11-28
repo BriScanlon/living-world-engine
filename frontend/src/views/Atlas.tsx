@@ -134,7 +134,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     // lettering: ink on paper, or light on the dark data map
     for (const l of map.getStyle().layers ?? []) {
       if (l.type !== "symbol" || !l.id.startsWith("label-") || l.id === "label-province") continue;
-      if (l.id === "label-water") {
+      if (l.id.startsWith("label-water")) {
         map.setPaintProperty(l.id, "text-color", parchment ? (look === "ink" ? "#2e2822" : "#34566e") : "#b9d6ea");
         map.setPaintProperty(l.id, "text-halo-color", parchment ? "#e8e2cc" : "#0b0f16");
         continue;
@@ -238,7 +238,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     // once zoomed in a little; in the party view only the provinces the party knows are named
     map.addSource("province-labels", { type: "geojson", data: empty });
     map.addLayer({
-      id: "label-province", type: "symbol", source: "province-labels", minzoom: 3.2,
+      id: "label-province", type: "symbol", source: "province-labels", minzoom: 5,
       layout: {
         "text-field": ["upcase", ["get", "name"]], "text-font": ["Noto Sans Italic"], "text-size": 10,
         "text-letter-spacing": 0.15, "text-max-width": 8, "text-padding": 6, "symbol-sort-key": 10,
@@ -261,8 +261,8 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         (map.getSource("waters") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: pts });
       })
       .catch(() => undefined);
-    map.addLayer({
-      id: "label-water", type: "symbol", source: "waters", minzoom: 3,
+    const waterLabel = (id: string, kinds: string[], minzoom: number) => map.addLayer({
+      id, type: "symbol", source: "waters", minzoom, filter: ["in", ["get", "kind"], ["literal", kinds]],
       layout: {
         "text-field": ["case", ["==", ["get", "kind"], "lake"], ["get", "name"], ["upcase", ["get", "name"]]],
         "text-font": ["Noto Sans Italic"],
@@ -272,6 +272,8 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       },
       paint: { "text-color": "#b9d6ea", "text-halo-color": "#0b0f16", "text-halo-width": 1, "text-opacity": 0.9 },
     });
+    waterLabel("label-water", ["sea", "gulf"], 3);
+    waterLabel("label-water-small", ["bay", "strait", "lake"], 5.5);
     map.addLayer({
       id: "route", type: "line", source: "route",
       layout: { "line-cap": "round", "line-join": "round" },
@@ -328,9 +330,9 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       paint: { "text-color": "#f3ead2", "text-opacity": 0.85, "text-halo-color": "#0b0f16", "text-halo-width": 1.2 },
     });
     const notStart = ["!=", ["get", "start"], true];  // the start town has its own (capital) label
-    placeLabel("label-local", ["all", notStart, ["!", ["in", ["get", "kind"], ["literal", ["continent", "capital", "city", "town"]]]]], 8, 11);
-    placeLabel("label-town", ["all", notStart, ["==", ["get", "kind"], "town"]], 4.5, 11);
-    placeLabel("label-city", ["all", notStart, ["==", ["get", "kind"], "city"]], 3, 12);
+    placeLabel("label-local", ["all", notStart, ["!", ["in", ["get", "kind"], ["literal", ["continent", "capital", "city", "town"]]]]], 9, 11);
+    placeLabel("label-town", ["all", notStart, ["==", ["get", "kind"], "town"]], 6.5, 11);
+    placeLabel("label-city", ["all", notStart, ["==", ["get", "kind"], "city"]], 5, 12);
     placeLabel("label-capital", ["any", ["==", ["get", "kind"], "capital"], ["==", ["get", "start"], true]], 0, 12.5,
       "Noto Sans Medium");
     const pick = (layer: string) => (e: maplibregl.MapLayerMouseEvent) => {
@@ -463,25 +465,30 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
                 </button>
               ))}
             </div>
-            <select className="rounded bg-ink-800 px-1.5 py-1 text-xs ring-1 ring-ink-700" value={look}
-              onChange={(e) => setLook(e.target.value as AtlasLook)}
-              title="The globe's look: data colours, or the drawn parchment map (from regional zoom)">
-              <option value="data">data</option>
-              <option value="colour">parchment</option>
-              <option value="ink">parchment (ink)</option>
-            </select>
+<div className="inline-flex rounded-lg bg-ink-800 p-0.5 ring-1 ring-ink-700" title="The globe's look: data colours, or the drawn parchment map, in colour or ink (from regional zoom)">
+              {([["data", "Data"], ["colour", "Parchment"], ["ink", "Ink"]] as const).map(([v, label]) => (
+                <button key={v} type="button"
+                  className={cx("rounded-md px-2.5 py-1 text-xs font-medium", look === v ? "bg-amber-500 text-ink-950" : "text-ink-300 hover:text-ink-100")}
+                  onClick={() => setLook(v)}>
+                  {label}
+                </button>
+              ))}
+            </div>
             {view === "party" && (
               <>
                 <Button variant="primary" disabled={tableBusy || !state?.party?.name} onClick={partyToTable}
                   title="Draw this view as an overland map and show it on the players' table">
                   {tableBusy ? <Spinner /> : "▶"} Party map on the table
                 </Button>
-                <select className="rounded bg-ink-800 px-1.5 py-1 text-xs" value={mapStyle}
-                  onChange={(e) => setMapStyle(e.target.value as PartyMapStyle)}
-                  title="Colour washes, or paper and ink only like Tolkien's maps">
-                  <option value="colour">colour</option>
-                  <option value="ink">ink</option>
-                </select>
+    <div className="inline-flex rounded-lg bg-ink-800 p-0.5 ring-1 ring-ink-700" title="The party map's look: colour washes, or paper and ink only like Tolkien's maps">
+                  {([["colour", "Colour"], ["ink", "Ink"]] as const).map(([v, label]) => (
+                    <button key={v} type="button"
+                      className={cx("rounded-md px-2.5 py-1 text-xs font-medium", mapStyle === v ? "bg-amber-500 text-ink-950" : "text-ink-300 hover:text-ink-100")}
+                      onClick={() => setMapStyle(v)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <a className="text-xs text-ember-300 hover:underline" href={api.partyMapUrl(branch, day, mapStyle)} target="_blank" rel="noreferrer">preview</a>
               </>
             )}

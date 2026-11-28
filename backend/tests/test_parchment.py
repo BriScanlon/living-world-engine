@@ -47,6 +47,7 @@ def _img(data):
 
 
 def test_a_tile_draws_the_land_and_is_cached(world):
+    from atlas import parchment
     from atlas.parchment import cache_dir, render_tile
     slug, (lon, lat) = world
     x, y = _tile_at(lon, lat, 6)
@@ -54,7 +55,7 @@ def test_a_tile_draws_the_land_and_is_cached(world):
     img = _img(data)
     assert img.shape == (512, 512, 4) and img[..., 3].mean() > 200  # drawn, opaque inside the region
     assert img[..., :3].std() > 10  # coast, symbols: not a flat fill
-    assert (cache_dir(slug) / "colour" / "6" / str(x) / f"{y}.webp").read_bytes() == data
+    assert (cache_dir(slug) / parchment.VERSION / "colour" / "6" / str(x) / f"{y}.webp").read_bytes() == data
     assert render_tile(slug, 6, x, y) == data
 
 
@@ -82,3 +83,8 @@ def test_ink_tiles_have_no_colour(world):
     x, y = _tile_at(lon, lat, 6)
     rgb = _img(render_tile(slug, 6, x, y, "ink"))[..., :3]
     assert ((rgb.max(axis=2) - rgb.min(axis=2)) > 70).mean() < 0.01
+
+
+def test_far_out_tiles_are_sparser():
+    from atlas.parchment import terrain_density
+    assert terrain_density(4) < terrain_density(6) < terrain_density(8) == 1.0

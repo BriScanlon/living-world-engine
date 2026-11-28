@@ -271,7 +271,7 @@ def kinds_for(h: int, b: int) -> list[tuple[str, float]]:
 
 
 def place(cells: np.ndarray, cell_px: float, land: Image.Image, avoid: Image.Image, scale: float, seed: int,
-          budget: int = 80000) -> list[Symbol]:
+          budget: int = 80000, density: float = 1.0) -> list[Symbol]:
     """Symbols for relief cells ``cells`` (rows of x, y, h, b in pixels), ``cell_px`` apart, at ``scale`` x their base
     size. A symbol is kept only where ``land`` is set and ``avoid`` (roads, rivers, towns) is not, at its foot and
     beside it. Back to front (by y)."""
@@ -291,7 +291,7 @@ def place(cells: np.ndarray, cell_px: float, land: Image.Image, avoid: Image.Ima
     out: list[Symbol] = []
     for i, x, y, h, kind, n in plan:
         r = random.Random(seed * 1_000_003 + i * 31 + GLYPHS.index(kind))
-        n *= thin
+        n *= thin * density
         count = int(n) + (1 if r.random() < n - int(n) else 0)
         base = "mountain" if kind == "snowpeak" else kind
         size = SIZE.get(base, 11) * scale
