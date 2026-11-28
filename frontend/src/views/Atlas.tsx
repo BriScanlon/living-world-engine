@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, PartyKnows, PartyMapStyle, PlaceDetail, VttMap } from "../api";
+import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, AtlasLook, PartyKnows, PartyMapStyle, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -31,6 +31,8 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const [branch, setBranch] = useState("main");
   const [compare, setCompare] = useState(true);
   const [view, setView] = useState<AtlasView>("dm");
+  // the atlas's look: data colours, or the drawn parchment map in colour or ink (#57)
+  const [look, setLook] = useState<AtlasLook>("data");
   const [zoom, setZoom] = useState(0);
   const [tableNote, setTableNote] = useState<string | null>(null);
   const [tableBusy, setTableBusy] = useState(false);
@@ -113,6 +115,37 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     };
   }, []);
 
+  // ------------------------------------------------------------------ the look: data or parchment (#57)
+  useEffect(() => {
+    const map = mapRef.current;
+    const slug = state?.atlas?.slug;
+    if (!map || !ready || !slug || !map.getLayer("parchment")) return;
+    const parchment = look !== "data";
+    if (parchment) {
+      (map.getSource("parchment") as maplibregl.RasterTileSource).setTiles(
+        [`${location.origin}/api/atlas/parchment/${slug}/{z}/{x}/{y}.webp?style=${look === "ink" ? "ink" : "colour"}`]);
+    }
+    map.setLayoutProperty("parchment", "visibility", parchment ? "visible" : "none");
+    for (const id of ["biomes", "rivers", "roads", "sea-lanes"]) {  // drawn into the parchment instead
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", parchment ? "none" : "visible");
+    }
+    if (map.getLayer("province-fill")) map.setPaintProperty("province-fill", "fill-opacity", parchment ? 0.22 : 0.5);
+    if (map.getLayer("province-line")) map.setPaintProperty("province-line", "line-opacity", parchment ? 0.35 : 0.7);
+    // lettering: ink on paper, or light on the dark data map
+    for (const l of map.getStyle().layers ?? []) {
+      if (l.type !== "symbol" || !l.id.startsWith("label-") || l.id === "label-province") continue;
+      if (l.id === "label-water") {
+        map.setPaintProperty(l.id, "text-color", parchment ? (look === "ink" ? "#2e2822" : "#34566e") : "#b9d6ea");
+        map.setPaintProperty(l.id, "text-halo-color", parchment ? "#e8e2cc" : "#0b0f16");
+        continue;
+      }
+      map.setPaintProperty(l.id, "text-color", parchment
+        ? ["case", ["==", ["get", "start"], true], "#8a4a10", "#281e14"]
+        : ["case", ["==", ["get", "start"], true], "#f5c77e", ["get", "campaign"], "#f3d9a8", "#e6eaf0"]);
+      map.setPaintProperty(l.id, "text-halo-color", parchment ? "#f1e8cf" : "#0b0f16");
+    }
+  }, [look, ready, state?.atlas?.slug, view]);
+
   // ------------------------------------------------------------------ static layers (once per atlas)
   useEffect(() => {
     const map = mapRef.current;
@@ -143,6 +176,13 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       id: "biomes", type: "fill", source: src("biomes"), ...srcLayer("biomes"),
       paint: { "fill-color": ["get", "color"], "fill-opacity": 0.75 },
     });
+    // Parchment: the party map's drawn look as raster tiles (atlas/parchment.py); hidden until chosen
+    map.addSource("parchment", {
+      type: "raster", tileSize: 256, minzoom: 3, maxzoom: 11,
+      tiles: [`${location.origin}/api/atlas/parchment/${a.slug}/{z}/{x}/{y}.webp?style=colour`],
+    });
+    map.addLayer({ id: "parchment", type: "raster", source: "parchment", minzoom: 3, layout: { visibility: "none" },
+      paint: { "raster-fade-duration": 150 } });
     map.addLayer({
       id: "province-fill", type: "fill", source: src("provinces"), ...srcLayer("provinces"),
       paint: { "fill-color": ["coalesce", ["feature-state", "color"], "rgba(0,0,0,0)"], "fill-opacity": 0.5 },
@@ -207,6 +247,30 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         "text-color": "#2a2418", "text-halo-color": "#f3ead2", "text-halo-width": 1.4,
         "text-opacity": ["case", ["==", ["get", "known"], "heard"], 0.5, 0.8],
       },
+    });
+    // Seas, gulfs, bays, straits and lakes (atlas/waters.py): slanted, spaced, sea-blue (DM view)
+    map.addSource("waters", { type: "geojson", data: empty });
+    fetch(`${location.origin}${api.atlasFile(a.slug, "waters.geojson")}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((fc: GeoJSON.FeatureCollection | null) => {
+        if (!fc) return;
+        const pts = fc.features.filter((f) => f.properties?.label).map((f) => ({
+          type: "Feature" as const, properties: f.properties,
+          geometry: { type: "Point" as const, coordinates: f.properties!.label as number[] },
+        }));
+        (map.getSource("waters") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: pts });
+      })
+      .catch(() => undefined);
+    map.addLayer({
+      id: "label-water", type: "symbol", source: "waters", minzoom: 3,
+      layout: {
+        "text-field": ["case", ["==", ["get", "kind"], "lake"], ["get", "name"], ["upcase", ["get", "name"]]],
+        "text-font": ["Noto Sans Italic"],
+        "text-size": ["match", ["get", "kind"], "sea", 15, "gulf", 12, 11],
+        "text-letter-spacing": ["case", ["==", ["get", "kind"], "lake"], 0.05, 0.3], "text-max-width": 14,
+        "symbol-sort-key": 20,
+      },
+      paint: { "text-color": "#b9d6ea", "text-halo-color": "#0b0f16", "text-halo-width": 1, "text-opacity": 0.9 },
     });
     map.addLayer({
       id: "route", type: "line", source: "route",
@@ -399,6 +463,13 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
                 </button>
               ))}
             </div>
+            <select className="rounded bg-ink-800 px-1.5 py-1 text-xs ring-1 ring-ink-700" value={look}
+              onChange={(e) => setLook(e.target.value as AtlasLook)}
+              title="The globe's look: data colours, or the drawn parchment map (from regional zoom)">
+              <option value="data">data</option>
+              <option value="colour">parchment</option>
+              <option value="ink">parchment (ink)</option>
+            </select>
             {view === "party" && (
               <>
                 <Button variant="primary" disabled={tableBusy || !state?.party?.name} onClick={partyToTable}

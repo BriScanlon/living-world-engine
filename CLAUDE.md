@@ -116,6 +116,12 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
   symbols avoid the lettering): furniture boxes, place symbols (`_lay_out_places`; only capitals, cities, landmarks
   and the party's place reserve a box; symbol and font scale by median town spacing), province names, then realm
   names on their own faint layer. Fog is parchment (`FOG`), aged together with the map; `neatline` paints the margin.
+- **Parchment atlas tiles** (#57, `atlas/parchment.py`): `render_tile(slug, z, x, y, style)` draws through
+  `party_map.draw_world` (shared with the party map) with a `MercatorTile` projection, `SS=4` at 1024 px then scaled to
+  512 (served as 256 css px); seamless because `cell_px` is fixed per zoom, `wobble=False`, `budget` unlimited and
+  `keep` = tile + a band both neighbours draw. Cache `<atlas>/<slug>/parchment/<style>/z/x/y.webp`, removed by
+  `import_world`. Frontend: raster source `parchment` (z3-11) above `biomes`, toggled by `look`; it hides biomes,
+  rivers, roads and sea lanes and recolours `label-*` to ink. `waters.geojson` is served and lettered (`label-water`).
 - **Party map styles** (#57): `party_map.STYLES` (`colour`, `ink`) are palettes for the world section; setting
   `party_map_style`; `render(..., style=)`, `to_table(..., style=)` tags the VTT map `lwe-style:<style>` and
   `refresh_if_shown` redraws in it. Realm names use `frame.Labels.add_along` (per-letter positions, angles and boxes;

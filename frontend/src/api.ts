@@ -372,6 +372,8 @@ const enc = encodeURIComponent;
 
 /** The party map's look: biome and realm colour washes, or paper and ink only (like Tolkien's maps). */
 export type PartyMapStyle = "colour" | "ink";
+/** The atlas globe's look: data colours, or the drawn parchment map in colour or ink. */
+export type AtlasLook = "data" | "colour" | "ink";
 
 export const api = {
   health: () => req<Health>("/health"),
