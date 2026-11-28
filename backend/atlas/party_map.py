@@ -18,6 +18,7 @@ from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
 
 from atlas import cartography as carto
+from atlas import symbols
 from atlas.service import atlas_path, atlas_state
 from graph.store import GraphStore
 
@@ -27,7 +28,8 @@ SEA, SHALLOW, RIPPLE = (128, 164, 176), (176, 204, 204), (86, 122, 134)
 LAND, BORDER, COAST, LANE = (233, 218, 180), (104, 74, 96), (78, 58, 38), (236, 244, 246)
 RIVER, ROAD, INK = (79, 127, 166), (122, 90, 51), (40, 30, 20)
 FOG = (16, 20, 28)
-FOG_UNKNOWN, FOG_HEARD = 238, 120  # fog alpha over the unknown and the heard-of
+SYMBOL_SCALE = 0.6  # terrain symbols at 60% of their base size: fine detail, like a printed map
+FOG_UNKNOWN, FOG_HEARD = 253, 120  # fog alpha over the unknown (opaque enough that no ink shows) and the heard-of
 
 
 def _cell_px(proj: "Projection", relief: list[dict[str, Any]], land) -> float | None:
@@ -39,6 +41,33 @@ def _cell_px(proj: "Projection", relief: list[dict[str, Any]], land) -> float | 
     minx, miny, maxx, maxy = land.bounds
     inside = int(((xy[:, 0] >= minx) & (xy[:, 0] <= maxx) & (xy[:, 1] >= miny) & (xy[:, 1] <= maxy)).sum())
     return math.sqrt(land.area / inside) if inside else None
+
+
+def _relief_px(proj: "Projection", relief: list[dict[str, Any]]):
+    """Relief cells as rows of (x, y, height, biome) in pixels."""
+    import numpy as np
+    if not relief:
+        return np.zeros((0, 4))
+    xy = proj.arr(np.array([f["geometry"]["coordinates"] for f in relief], dtype=float))
+    hb = np.array([(f["properties"]["h"], f["properties"]["b"]) for f in relief], dtype=float)
+    return np.column_stack([xy, hb])
+
+
+def _height_at(cells, cell: float):
+    """Height lookup for any pixel: the highest cell within about a cell of it (0 where there's none)."""
+    import numpy as np
+    x0, y0 = cells[:, 0].min(), cells[:, 1].min()
+    nx, ny = int((cells[:, 0].max() - x0) / cell) + 3, int((cells[:, 1].max() - y0) / cell) + 3
+    grid = np.zeros((nx, ny))
+    np.maximum.at(grid, (((cells[:, 0] - x0) / cell).astype(int) + 1, ((cells[:, 1] - y0) / cell).astype(int) + 1), cells[:, 2])
+    pad = np.pad(grid, 1)
+    grid = np.max([pad[1 + dx:nx + 1 + dx, 1 + dy:ny + 1 + dy] for dx in (-1, 0, 1) for dy in (-1, 0, 1)], axis=0)
+
+    def at(pts):
+        i = np.clip(((pts[:, 0] - x0) / cell).astype(int) + 1, 0, nx - 1)
+        j = np.clip(((pts[:, 1] - y0) / cell).astype(int) + 1, 0, ny - 1)
+        return grid[i, j]
+    return at
 
 
 class NothingKnown(ValueError):
@@ -81,6 +110,10 @@ class Projection:
 
     def __call__(self, lon: float, lat: float) -> tuple[float, float]:
         return (lon * self.k - self.cx) * self.s + self.w / 2, self.h / 2 - (lat - self.cy) * self.s
+
+    def inverse(self, x: float, y: float) -> tuple[float, float]:
+        """Pixels back to (lon, lat)."""
+        return ((x - self.w / 2) / self.s + self.cx) / self.k, self.cy - (y - self.h / 2) / self.s
 
     def arr(self, a):
         """Many (lon, lat) at once: an (N, 2) array to pixels."""
@@ -180,11 +213,11 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     view = box(-0.1 * W, -0.1 * H, 1.1 * W, 1.1 * H)
     wob = carto.Wobble(seed, amp=1.6 * SS, scale=40 * SS)
 
-    lon0, lat0 = bounds[0], bounds[1]
-    span = (bounds[2] - bounds[0] + bounds[3] - bounds[1]) * 0.1
+    # clip to the whole picture (wider than ``bounds`` when the image's shape differs), with a margin
+    (ax, ay), (bx_, by_) = proj.inverse(-0.15 * W, 1.15 * H), proj.inverse(1.15 * W, -0.15 * H)
 
     def px(geom):
-        geom = shapely.clip_by_rect(geom, lon0 - span, lat0 - span, bounds[2] + span, bounds[3] + span)
+        geom = shapely.clip_by_rect(geom, ax, ay, bx_, by_)
         return carto.to_px(geom, proj.arr).intersection(view)
 
     land_feats = _features(slug, "land")
@@ -218,25 +251,48 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     draw = ImageDraw.Draw(img, "RGBA")
     for pts in carto.borders(list(prov_px.values()), wob, cell, clip=land.buffer(-1.5 * SS)):
         _dash(draw, pts, BORDER + (150,), max(1, SS), int(1.5 * SS), gap=3 * SS)  # dotted, unlike roads
+    river_lines, road_lines = [], []
     for f in _features(slug, "rivers"):
         g = px(shape(f["geometry"]))
         for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
-            if ln.geom_type != "LineString" or ln.length < 4 * SS:
-                continue
-            pts = carto.smooth_line(ln.coords, carto.Wobble(seed + 1, 1.5 * SS, 30 * SS), 4 * SS)
-            carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, RIVER + (255,))
+            if ln.geom_type == "LineString" and ln.length >= 4 * SS:
+                river_lines.append((ln, carto.smooth_line(ln.coords, carto.Wobble(seed + 1, 1.5 * SS, 30 * SS), 4 * SS)))
     for f in _features(slug, "roads"):
         group = (f.get("properties") or {}).get("group")
         g = px(shape(f["geometry"]))
         for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
-            if ln.geom_type != "LineString":
-                continue
-            pts = carto.smooth_line(ln.coords, carto.Wobble(seed + 2, 0, 1), 6 * SS)
-            if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
-                _dash(draw, pts, LANE + (210,), 2 * SS, 5 * SS)
-            else:
-                _dash(draw, pts, ROAD + (225,), (3 if group == "highways" else 2) * SS, 9 * SS)
+            if ln.geom_type == "LineString":
+                road_lines.append((group, carto.smooth_line(ln.coords, carto.Wobble(seed + 2, 0, 1), 6 * SS)))
+
+    # terrain symbols (#55): kept off rivers, roads and towns, inside the coast, back to front
+    avoid = Image.new("L", (W, H), 0)
+    adraw = ImageDraw.Draw(avoid)
+    for _, pts in river_lines:
+        adraw.line([tuple(q) for q in pts], fill=255, width=7 * SS)
+    for group, pts in road_lines:
+        if group != "searoutes":
+            adraw.line([tuple(q) for q in pts], fill=255, width=6 * SS)
+    for f in places:
+        x, y = proj(*f["geometry"]["coordinates"])
+        adraw.ellipse([x - 16 * SS, y - 16 * SS, x + 16 * SS, y + 16 * SS], fill=255)
+    cells = _relief_px(proj, relief)
+    if len(cells):
+        symbols.draw(img, symbols.place(cells, cell, mask, avoid, SS * SYMBOL_SCALE, seed))
+    draw = ImageDraw.Draw(img, "RGBA")
+    for ln, pts in river_lines:
+        carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, RIVER + (255,))
+    for group, pts in road_lines:
+        if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
+            _dash(draw, pts, LANE + (210,), 2 * SS, 5 * SS)
+        else:
+            _dash(draw, pts, ROAD + (225,), (3 if group == "highways" else 2) * SS, 9 * SS)
+    from shapely.geometry import LineString as _Line
+    symbols.crossings(img, [(g, _Line(pts)) for g, pts in road_lines if len(pts) > 1],
+                      unary_union([_Line(pts) for _, pts in river_lines if len(pts) > 1]) if river_lines else None, SS)
+    draw = ImageDraw.Draw(img, "RGBA")
     carto.outline(draw, land, COAST + (255,), 2 * SS)  # the inked coast, lakes too
+    if len(cells):
+        symbols.cliffs(img, land, mask, _height_at(cells, cell), SS)
     img = carto.parchment(img, seed)
 
     # ---- fog of war: soft-edged, over land and sea alike
