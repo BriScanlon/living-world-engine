@@ -105,6 +105,13 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
   alike; washes, ripples, tapered rivers, parchment; serif = DejaVu Serif from `fonts-dejavu-core`). Everything is
   seeded from the atlas slug, so redraws are identical. `relief.geojson` (one point per land cell: `h`, `b`) is
   written on import but kept out of `LAYERS`/tiles and the WorldAtlas layer list.
+- **Detailed coasts** (#62, `AzgaarWorld.layers(detail=True)`, setting `atlas_coast_detail`): `land.geojson` is the
+  smoothed cell coast + midpoint-displacement detail (`cartography.detailed_coast`, km frame, seeded by map position,
+  ~100 m segments, budget 70 points per land cell up to 400k), marked `properties.detail = "fractal"`; provinces and
+  biomes are `allocate`d to it (clipped, gaps to the nearest plain cell shape), rivers cut/extended to it
+  (`river_to_coast`), towns kept on land, inland ports get an estuary (`harbours`). The party map uses a detailed coast
+  as is (clipped + thinned to the pixel) and only smooths old cell coasts. Layers are ~5 MB each for a medium region;
+  tiles ~1.2 MB.
 
 ## The forecast pipeline (simulation/engine.py)
 
