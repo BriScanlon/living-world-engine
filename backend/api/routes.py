@@ -237,7 +237,7 @@ def agent_view(agent_id: str, branch: str = MAIN, day: int | None = None) -> dic
 
 # =========================================================================== atlas
 ATLAS_FILES = {"land.geojson", "biomes.geojson", "provinces.geojson", "rivers.geojson", "roads.geojson",
-               "burgs.geojson", "tiles.pmtiles"}
+               "burgs.geojson", "waters.geojson", "tiles.pmtiles"}
 
 
 @router.get("/atlas")
@@ -373,6 +373,20 @@ def atlas_file(slug: str, name: str) -> FileResponse:
         raise HTTPException(404, "Not built")
     media = "application/geo+json" if name.endswith(".geojson") else "application/vnd.pmtiles"
     return FileResponse(path, media_type=media, headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.get("/atlas/parchment/{slug}/{z}/{x}/{y}.webp")
+def atlas_parchment_tile(slug: str, z: int, x: int, y: int, style: str = "colour"):
+    """A parchment raster tile (Web Mercator): the party map's drawn look for the DM atlas (#57)."""
+    from fastapi.responses import Response
+
+    from atlas.parchment import render_tile
+    if not slug.replace("-", "").isalnum() or not (0 <= z <= 22 and 0 <= x < 2 ** z and 0 <= y < 2 ** z):
+        raise HTTPException(404, "No such tile")
+    if not (atlas_path(slug) / "land.geojson").exists():
+        raise HTTPException(404, "Not built")
+    return Response(render_tile(slug, z, x, y, style), media_type="image/webp",
+                    headers={"Cache-Control": "public, max-age=3600"})
 
 
 @router.post("/atlas/import")

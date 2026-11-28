@@ -265,7 +265,7 @@ export interface HomebrewState {
 }
 
 export interface AtlasState {
-  atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean } | null;
+  atlas: { slug: string; name: string; bbox: number[]; centre: [number, number] | null; layers: string[]; has_tiles: boolean; parchment?: string } | null;
   branch: string;
   compare: string | null;
   day: number;
@@ -372,6 +372,8 @@ const enc = encodeURIComponent;
 
 /** The party map's look: biome and realm colour washes, or paper and ink only (like Tolkien's maps). */
 export type PartyMapStyle = "colour" | "ink";
+/** The atlas globe's look: data colours, or the drawn parchment map in colour or ink. */
+export type AtlasLook = "data" | "colour" | "ink";
 
 export const api = {
   health: () => req<Health>("/health"),

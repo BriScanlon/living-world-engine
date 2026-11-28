@@ -55,6 +55,7 @@ def import_world(store: GraphStore, path: str | Path, *, branch: str = "main", s
     world = AzgaarWorld.load(path, slug)
     folder = atlas_path(world.slug)
     folder.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(folder / "parchment", ignore_errors=True)  # parchment tiles of the old map (#57)
     layers = world.layers(detail=get_settings().atlas_coast_detail)
     for name, fc in layers.items():
         (folder / f"{name}.geojson").write_text(json.dumps(fc), encoding="utf-8")
@@ -202,6 +203,12 @@ def _coords(w: WorldView, doc_id: str | None, depth: int = 0) -> tuple[float, fl
     return None
 
 
+def _parchment_version() -> str:
+    """The parchment tiles' drawing version: part of their URL, so browsers don't keep showing older drawings."""
+    from atlas.parchment import VERSION
+    return VERSION
+
+
 def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
                 compare: str | None = None, view: str = "dm") -> dict[str, Any]:
     """Live map state. ``view="party"`` shows only what the party knows (see :mod:`atlas.party`)."""
@@ -292,7 +299,8 @@ def atlas_state(store: GraphStore, branch: str = "main", day: int | None = None,
     return {
         "atlas": {"slug": a["uid"], "name": a["name"], "bbox": json.loads(a["bbox"]),
                   "centre": json.loads(a["centre"]) if a.get("centre") else None,
-                  "layers": json.loads(a["layers"]), "has_tiles": a["has_tiles"]},
+                  "layers": json.loads(a["layers"]), "has_tiles": a["has_tiles"],
+                  "parchment": _parchment_version()},
         "branch": branch, "compare": None if pv else compare, "day": the_day, "max_day": full.max_day(),
         "view": "party" if pv else "dm",
         "party": _party_summary(w, pv) if view == "party" else None,

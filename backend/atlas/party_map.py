@@ -86,7 +86,7 @@ def _height_at(cells, cell: float):
 
 
 def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dict[str, Any]], party: dict[str, Any],
-                    events: list[dict[str, Any]] = ()) -> list[dict[str, Any]]:
+                    events: list[dict[str, Any]] = (), near: float = 1.0) -> list[dict[str, Any]]:
     """Where each known place's symbol goes and where its name fits; returns the symbols (marks) to draw."""
     marks: list[dict[str, Any]] = []
     # every settlement gets its own symbol; buildings and districts are listed under the settlement they sit in
@@ -96,9 +96,9 @@ def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dic
         if f["properties"].get("kind") in emblems.SETTLEMENTS or f["properties"].get("kind") == "continent":
             continue
         c = f["geometry"]["coordinates"]
-        near = min(groups, default=None, key=lambda g: haversine_km(c, g[0]["geometry"]["coordinates"]))
-        if near and haversine_km(c, near[0]["geometry"]["coordinates"]) < SETTLEMENT_KM:  # in that town
-            near.append(f)
+        host = min(groups, default=None, key=lambda g: haversine_km(c, g[0]["geometry"]["coordinates"]))
+        if host and haversine_km(c, host[0]["geometry"]["coordinates"]) < SETTLEMENT_KM:  # in that town
+            host.append(f)
         else:
             groups.append([f])
     groups.sort(key=lambda g: (not any(p["properties"].get("here") for p in g), RANK.get(g[0]["properties"].get("kind"), 9)))
@@ -112,12 +112,15 @@ def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dic
         emblem = emblems.emblem_for(head.get("kind"), head.get("name"))
         major = head.get("kind") in ("capital", "city") or (emblem and head.get("kind") not in emblems.SETTLEMENTS)
         here = any(g["properties"].get("here") for g in group)
+        if not (major or here) and near < SHOW_TOWN_SYMBOLS:
+            emblem = None  # far out, a lesser town is just a dot
         scale = max(k, 0.7) if major or here else k
-        half = emblems.SIZE.get(emblem, 22) * SS * 0.5 * scale if emblem else 4 * SS
+        half = emblems.SIZE.get(emblem, 22) * SS * 0.5 * scale if emblem else (4 if near >= SHOW_TOWN_SYMBOLS else 2.5) * SS
         state = "visited" if any(g["properties"]["known"] == "visited" for g in group) else "heard"
         box = (x - half * 1.1, y - half * 1.3, x + half * 1.1 + (22 * SS * scale if head.get("port") else 0), y + half * 1.1)
         marks.append({"x": x, "y": y, "emblem": emblem, "half": half, "state": state, "box": box, "group": group,
-                      "port": head.get("port"), "here": here, "scale": scale})
+                      "port": head.get("port") and (major or here or near >= SHOW_TOWN_SYMBOLS), "here": here,
+                      "scale": scale, "major": bool(major)})
         if major or here:  # lesser settlements' symbols may sit under a label's halo
             layout.reserve(box)
     for e in events:  # battles the party knows of
@@ -135,6 +138,10 @@ def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dic
             continue
         head = m["group"][0]["properties"]
         rest = [g["properties"] for g in m["group"][1:]]
+        if not (m.get("major") or m["here"] or head.get("start")) and near < SHOW_TOWN_NAMES:
+            continue  # far out: only the main names
+        if near < SHOW_TOWN_NAMES and not m["here"]:
+            rest = []  # and no lists of buildings
         x, y, half = m["x"], m["y"], m["half"]
         bx0, by0, bx1, by1 = m["box"]  # labels go just outside the symbol's own box
         seen = m["state"] == "visited"
@@ -161,6 +168,19 @@ def _lay_out_places(layout: "frame.Labels", proj: "Projection", places: list[dic
 
 
 WATER_INK, WATER_HALO = (52, 86, 110, 255), (200, 220, 224, 170)
+
+# What is shown at which closeness (median town spacing / 40 base px): far out only the main names; more as you zoom in
+SHOW_TOWN_NAMES, SHOW_TOWN_SYMBOLS, SHOW_PROVINCES, SHOW_BAYS, SHOW_LAKES = 0.75, 0.5, 0.6, 0.6, 0.75
+
+
+def closeness(places: list[dict[str, Any]], proj: "Projection") -> float:
+    """How far in this map is: the median spacing of its settlements over the spacing that letters them comfortably
+    (1 = room for every town's name; a whole region seen at once is about 0.3)."""
+    pts = [proj(*f["geometry"]["coordinates"]) for f in places if f["properties"].get("kind") in emblems.SETTLEMENTS]
+    if len(pts) < 2:
+        return 1.0
+    gaps = sorted(min(math.dist(a, b) for b in pts if b is not a) for a in pts)
+    return gaps[len(gaps) // 2] / (40 * SS)
 
 
 def polylabel_px(g) -> tuple[float, float]:
@@ -190,12 +210,15 @@ def known_waters(waters: list[dict[str, Any]], known_area, min_share: float = 0.
 
 
 def _lay_out_waters(layout: "frame.Labels", proj: "Projection", waters: list[dict[str, Any]], known_area,
-                    ink=WATER_INK, halo=WATER_HALO) -> None:
+                    ink=WATER_INK, halo=WATER_HALO, near: float = 1.0) -> None:
     """Sea, gulf, bay and strait names in slanted, spaced sea-blue capitals (lakes in plain slanted letters), sized
     to the room the water has, biggest first."""
     from shapely.ops import polylabel
     for w, part in sorted(known_waters(waters, known_area), key=lambda wp: -(wp[0]["properties"].get("area_km2") or 0)):
         p = w["properties"]
+        kind = p.get("kind")
+        if (kind in ("gulf", "bay", "strait") and near < SHOW_BAYS) or (kind == "lake" and near < SHOW_LAKES):
+            continue  # far out: only the seas
         room_deg = None
         if part.geom_type == "Point":
             at = part
@@ -219,7 +242,7 @@ def _lay_out_waters(layout: "frame.Labels", proj: "Projection", waters: list[dic
 
 
 def _lay_out_regions(layout: "frame.Labels", proj: "Projection", known: dict[str, Any], provinces: dict[str, Any],
-                     realms_only: bool = False) -> None:
+                     realms_only: bool = False, near: float = 1.0) -> None:
     """Realm names, large and spaced across the provinces of theirs the party has been in (``realms_only``); or the
     province names, each kept inside its province."""
     realms: dict[str, list] = {}
@@ -232,6 +255,8 @@ def _lay_out_regions(layout: "frame.Labels", proj: "Projection", known: dict[str
             if seen and p.get("controller_name"):
                 realms.setdefault(p["controller_name"], []).append(g)
             continue
+        if near < (SHOW_PROVINCES if seen else SHOW_TOWN_NAMES):
+            continue  # far out the realms are named, not their provinces
         x, y = proj(*g.representative_point().coords[0])
         cands = [(x, y + dy * SS, "mm") for dy in (0, -30, 30, -60, 60)]
         cands = [c for c in cands if g.contains(Point(*proj.inverse(c[0], c[1])))] or cands[:1]
@@ -239,8 +264,9 @@ def _lay_out_regions(layout: "frame.Labels", proj: "Projection", known: dict[str
                    (92, 66, 40) if seen else FADED, HALO)
     for name, gs in realms.items():
         g = shapely.make_valid(carto.to_px(unary_union(gs), proj.arr))
-        if g.is_empty:
+        if g.is_empty or not carto.polys(g):  # nothing with an area to letter across
             continue
+        g = unary_union(carto.polys(g))
         rect = g.minimum_rotated_rectangle
         rc = list(rect.exterior.coords)[:4] if rect.geom_type == "Polygon" else []
         if len(rc) < 4:
@@ -393,6 +419,114 @@ def _clusters(features: list[dict[str, Any]], proj: Projection, radius: float) -
     return groups
 
 
+def draw_world(proj, W: int, H: int, slug: str, pal: dict[str, Any], seed: int, ss: float, *,
+               provinces: dict[str, Any] | None = None, realm_tints: list | None = None, avoid_boxes=(),
+               cell_px: float | None = None, budget: int = 80000, wobble: bool = True, keep: tuple | None = None,
+               density: float = 1.0):
+    """The world as a cartographer draws it, on a W x H canvas through ``proj`` (anything with ``__call__``, ``arr``,
+    ``inverse``): sea, shallows and ripples, land, biome and realm washes, borders, terrain symbols, rivers, roads,
+    bridges, the inked coast and cliffs. ``ss`` scales every line and symbol. Returns (image, land in pixels, land
+    mask, relief cells in pixels, cell size in pixels).
+
+    For tiles that must meet seamlessly (#57): pass ``cell_px`` (the same for every tile of a zoom), ``wobble=False``
+    and a large ``budget`` (so nothing depends on what else is in the frame), and ``keep`` = the (x0, y0, x1, y1) a
+    symbol's foot must be in (the tile plus a margin both neighbours draw alike)."""
+    view = box(-0.1 * W, -0.1 * H, 1.1 * W, 1.1 * H)
+    wob = carto.Wobble(seed, amp=1.6 * ss if wobble else 0, scale=40 * ss)
+    (ax, ay), (bx_, by_) = proj.inverse(-0.15 * W, 1.15 * H), proj.inverse(1.15 * W, -0.15 * H)
+
+    def px(geom):
+        rect = (min(ax, bx_), min(ay, by_), max(ax, bx_), max(ay, by_))
+        try:
+            geom = shapely.clip_by_rect(geom, *rect)
+        except shapely.errors.GEOSException:  # a degenerate ring: the slower, sturdier way
+            geom = shapely.make_valid(geom).intersection(box(*rect))
+        g = carto.to_px(geom, proj.arr)
+        if not g.is_valid:  # projecting can pinch a ring; mend it rather than fail
+            g = shapely.make_valid(g)
+        return g.intersection(view)
+
+    land_feats = _features(slug, "land")
+    raw_land = unary_union([px(shape(f["geometry"]).buffer(0)) for f in land_feats])
+    relief = [f for f in _features(slug, "relief")]
+    cell = cell_px or _cell_px(proj, relief, raw_land) or 30.0 * ss
+    if any((f.get("properties") or {}).get("detail") for f in land_feats):  # already drawn at import (#62)
+        land = raw_land.simplify(0.5 * ss)
+    else:  # an older import: cell outlines, smoothed here
+        land = carto.smooth(raw_land, wob, cell)
+    img = Image.new("RGBA", (W, H), pal["sea"] + (255,))
+    if pal["shallow"]:
+        img.alpha_composite(carto.shallows((W, H), land, 22 * ss / 2 * 2, pal["shallow"] + (170,)))
+    draw = ImageDraw.Draw(img, "RGBA")
+    carto.ripples(draw, land, [9 * ss, 18 * ss, 29 * ss], pal["ripple"] + (150,), max(1, round(ss / 2 * 2)))
+    carto.fill(draw, land, pal["land"] + (255,), hole=pal["sea"] + (255,))
+    mask = Image.new("L", (W, H), 0)
+    carto.fill(ImageDraw.Draw(mask), land, 255, hole=0)
+    if pal["washes"]:
+        paint = []
+        for f in _features(slug, "biomes"):  # biomes, muted into the parchment
+            c = _hex(f["properties"].get("color"))
+            paint.append((px(shape(f["geometry"]).buffer(0)),
+                          tuple(int(0.65 * c[i] + 0.35 * pal["land"][i]) for i in range(3)) + (110,)))
+        tint = carto.wash((W, H), paint, cell * 0.45)
+        if realm_tints:  # who holds the provinces: a soft wash of the realm's colour
+            tint.alpha_composite(carto.wash((W, H), [(px(g.buffer(0)), c) for g, c in realm_tints], cell * 0.8))
+        base = img.copy()
+        base.alpha_composite(tint)
+        img = Image.composite(base, img, mask)  # colour stays inside the coast
+    draw = ImageDraw.Draw(img, "RGBA")
+    if provinces:
+        prov_px = [px(g.buffer(0)) for g in provinces.values()]
+        for pts in carto.borders(prov_px, wob, cell, clip=land.buffer(-1.5 * ss)):
+            _dash(draw, pts, pal["border"] + (150,), max(1, round(ss)), int(1.5 * ss), gap=int(3 * ss))  # dotted
+    river_lines, road_lines = [], []
+    for f in _features(slug, "rivers"):
+        g = px(shape(f["geometry"]))
+        for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
+            if ln.geom_type == "LineString" and ln.length >= 4 * ss:
+                river_lines.append((ln, carto.smooth_line(ln.coords, carto.Wobble(seed + 1, 1.5 * ss if wobble else 0,
+                                                                                  30 * ss), 4 * ss)))
+    for f in _features(slug, "roads"):
+        group = (f.get("properties") or {}).get("group")
+        g = px(shape(f["geometry"]))
+        for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
+            if ln.geom_type == "LineString":
+                road_lines.append((group, carto.smooth_line(ln.coords, carto.Wobble(seed + 2, 0, 1), 6 * ss)))
+
+    # terrain symbols (#55): kept off rivers, roads, towns and lettering, inside the coast, back to front
+    avoid = Image.new("L", (W, H), 0)
+    adraw = ImageDraw.Draw(avoid)
+    for _, pts in river_lines:
+        adraw.line([tuple(q) for q in pts], fill=255, width=int(7 * ss))
+    for group, pts in road_lines:
+        if group != "searoutes":
+            adraw.line([tuple(q) for q in pts], fill=255, width=int(6 * ss))
+    for bx in avoid_boxes:
+        adraw.rectangle(bx, fill=255)
+    cells = _relief_px(proj, relief)
+    if len(cells):
+        placed = symbols.place(cells, cell, mask, avoid, ss * SYMBOL_SCALE, seed, budget=budget, density=density)
+        if keep:
+            placed = [s for s in placed if keep[0] <= s.x < keep[2] and keep[1] <= s.y < keep[3]]
+        symbols.draw(img, placed)
+    draw = ImageDraw.Draw(img, "RGBA")
+    for ln, pts in river_lines:
+        carto.taper(draw, pts, 0.8 * ss / 2 * 2, min(5.0, 1.6 + ln.length / (350 * ss)) * ss, pal["river"] + (255,))
+    for group, pts in road_lines:
+        if group == "searoutes":  # sea lanes: sailed
+            _dash(draw, pts, pal["lane"] + (210,), int(2 * ss / 2 * 2), int(5 * ss))
+        else:
+            _dash(draw, pts, pal["road"] + (225,), int((3 if group == "highways" else 2) * ss), int(9 * ss))
+    from shapely.geometry import LineString as _Line
+    symbols.crossings(img, [(g, _Line(pts)) for g, pts in road_lines if len(pts) > 1],
+                      unary_union([_Line(pts) for _, pts in river_lines if len(pts) > 1]) if river_lines else None, ss)
+    draw = ImageDraw.Draw(img, "RGBA")
+    carto.outline(draw, land, pal["coast"] + (255,), int(2 * ss))  # the inked coast, lakes too
+    if len(cells):
+        symbols.cliffs(img, land, mask, _height_at(cells, cell), ss)
+    return img, land, mask, cells, cell
+
+
 def render(store: GraphStore, branch: str = "main", day: int | None = None,
            size: tuple[int, int] = SIZE, style: str | None = None) -> tuple[bytes, dict[str, Any]]:
     """The party's overland map as a WebP image, plus what it shows. ``style``: "colour" or "ink" (default: the
@@ -434,12 +568,13 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
                                    _font(20 * SS), SS))
     layout.reserve(frame.scale_bar(deco, inner[2] - 24 * SS, inner[3] - 24 * SS, proj.km_per_px(), W * 0.12,
                                    _font(16 * SS), SS))
-    marks = _lay_out_places(layout, proj, places, party, events=(st.get("events") or {}).get("features", []))
+    near = closeness(places, proj)
+    marks = _lay_out_places(layout, proj, places, party, events=(st.get("events") or {}).get("features", []), near=near)
     n_place_labels = len(layout.placed)
-    _lay_out_regions(layout, proj, known, provinces, realms_only=False)
+    _lay_out_regions(layout, proj, known, provinces, realms_only=False, near=near)
     known_area = unary_union(seen + heard).buffer(0.25 * pad) if (seen or heard) else None
     _lay_out_waters(layout, proj, _features(slug, "waters"), known_area, ink=pal["water_ink"],
-                    halo=pal["water_halo"])
+                    halo=pal["water_halo"], near=near)
     # realm names: their own layer, large and faint under the rest; they avoid each other, the furniture and the
     # province names, but may run under a town's name, as on old maps
     realm_layout = frame.Labels(layout.bounds, pad=6 * SS,
@@ -448,91 +583,12 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
 
     # ---- the world as drawn by a cartographer (atlas/cartography.py)
     seed = carto.seed_of(slug)
-    view = box(-0.1 * W, -0.1 * H, 1.1 * W, 1.1 * H)
-    wob = carto.Wobble(seed, amp=1.6 * SS, scale=40 * SS)
-
-    # clip to the whole picture (wider than ``bounds`` when the image's shape differs), with a margin
-    (ax, ay), (bx_, by_) = proj.inverse(-0.15 * W, 1.15 * H), proj.inverse(1.15 * W, -0.15 * H)
-
-    def px(geom):
-        geom = shapely.clip_by_rect(geom, ax, ay, bx_, by_)
-        return carto.to_px(geom, proj.arr).intersection(view)
-
-    land_feats = _features(slug, "land")
-    raw_land = unary_union([px(shape(f["geometry"]).buffer(0)) for f in land_feats])
-    relief = [f for f in _features(slug, "relief")]
-    cell = _cell_px(proj, relief, raw_land) or 30.0 * SS
-    if any((f.get("properties") or {}).get("detail") for f in land_feats):  # already drawn at import (#62)
-        land = raw_land.simplify(0.5 * SS)
-    else:  # an older import: cell outlines, smoothed here
-        land = carto.smooth(raw_land, wob, cell)
-    img = Image.new("RGBA", (W, H), pal["sea"] + (255,))
-    if pal["shallow"]:
-        img.alpha_composite(carto.shallows((W, H), land, 22 * SS, pal["shallow"] + (170,)))
-    draw = ImageDraw.Draw(img, "RGBA")
-    carto.ripples(draw, land, [9 * SS, 18 * SS, 29 * SS], pal["ripple"] + (150,), max(1, SS))
-    carto.fill(draw, land, pal["land"] + (255,), hole=pal["sea"] + (255,))
-    mask = Image.new("L", (W, H), 0)
-    carto.fill(ImageDraw.Draw(mask), land, 255, hole=0)
-    paint = []
-    for f in _features(slug, "biomes"):  # biomes, muted into the parchment
-        c = _hex(f["properties"].get("color"))
-        paint.append((px(shape(f["geometry"]).buffer(0)), tuple(int(0.65 * c[i] + 0.35 * pal["land"][i]) for i in range(3)) + (110,)))
-    prov_px = {uid: px(g.buffer(0)) for uid, g in provinces.items()}
-    tint = carto.wash((W, H), paint if pal["washes"] else [], cell * 0.45)
-    realms = [(prov_px[uid], _hex(p.get("color")) + (70,)) for uid, p in known.items()
-              if p["known"] == "visited" and p.get("controller") and uid in prov_px]
-    if realms and pal["washes"]:  # who holds the provinces the party has seen: a soft wash of the realm's colour
-        tint.alpha_composite(carto.wash((W, H), realms, cell * 0.8))
-    base = img.copy()
-    base.alpha_composite(tint)
-    img = Image.composite(base, img, mask)  # colour stays inside the smoothed coast
-    draw = ImageDraw.Draw(img, "RGBA")
-    for pts in carto.borders(list(prov_px.values()), wob, cell, clip=land.buffer(-1.5 * SS)):
-        _dash(draw, pts, pal["border"] + (150,), max(1, SS), int(1.5 * SS), gap=3 * SS)  # dotted, unlike roads
-    river_lines, road_lines = [], []
-    for f in _features(slug, "rivers"):
-        g = px(shape(f["geometry"]))
-        for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
-            if ln.geom_type == "LineString" and ln.length >= 4 * SS:
-                river_lines.append((ln, carto.smooth_line(ln.coords, carto.Wobble(seed + 1, 1.5 * SS, 30 * SS), 4 * SS)))
-    for f in _features(slug, "roads"):
-        group = (f.get("properties") or {}).get("group")
-        g = px(shape(f["geometry"]))
-        for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
-            if ln.geom_type == "LineString":
-                road_lines.append((group, carto.smooth_line(ln.coords, carto.Wobble(seed + 2, 0, 1), 6 * SS)))
-
-    # terrain symbols (#55): kept off rivers, roads and towns, inside the coast, back to front
-    avoid = Image.new("L", (W, H), 0)
-    adraw = ImageDraw.Draw(avoid)
-    for _, pts in river_lines:
-        adraw.line([tuple(q) for q in pts], fill=255, width=7 * SS)
-    for group, pts in road_lines:
-        if group != "searoutes":
-            adraw.line([tuple(q) for q in pts], fill=255, width=6 * SS)
-    for m in marks:
-        adraw.rectangle(m["box"], fill=255)
-    for lab in layout.placed:
-        adraw.rectangle(lab.box, fill=255)
-    cells = _relief_px(proj, relief)
-    if len(cells):
-        symbols.draw(img, symbols.place(cells, cell, mask, avoid, SS * SYMBOL_SCALE, seed))
-    draw = ImageDraw.Draw(img, "RGBA")
-    for ln, pts in river_lines:
-        carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, pal["river"] + (255,))
-    for group, pts in road_lines:
-        if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
-            _dash(draw, pts, pal["lane"] + (210,), 2 * SS, 5 * SS)
-        else:
-            _dash(draw, pts, pal["road"] + (225,), (3 if group == "highways" else 2) * SS, 9 * SS)
-    from shapely.geometry import LineString as _Line
-    symbols.crossings(img, [(g, _Line(pts)) for g, pts in road_lines if len(pts) > 1],
-                      unary_union([_Line(pts) for _, pts in river_lines if len(pts) > 1]) if river_lines else None, SS)
-    draw = ImageDraw.Draw(img, "RGBA")
-    carto.outline(draw, land, pal["coast"] + (255,), 2 * SS)  # the inked coast, lakes too
-    if len(cells):
-        symbols.cliffs(img, land, mask, _height_at(cells, cell), SS)
+    realm_tints = [(provinces[uid], _hex(p.get("color")) + (70,)) for uid, p in known.items()
+                   if p["known"] == "visited" and p.get("controller") and uid in provinces]
+    img, land, mask, cells, cell = draw_world(
+        proj, W, H, slug, pal, seed, SS, provinces=provinces, realm_tints=realm_tints,
+        avoid_boxes=[m["box"] for m in marks] + [lab.box for lab in layout.placed],
+        density=min(1.0, max(0.45, near)))  # far out, thinner terrain too
 
     # ---- fog of war: soft-edged, over land and sea alike
     mask = Image.new("L", (W, H), FOG_UNKNOWN)
@@ -569,8 +625,9 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
             if m["emblem"]:
                 emblems.draw(ld, m["emblem"], m["x"], m["y"], SS * m.get("scale", 1.0))
             else:
-                r = 4 * SS
-                ld.ellipse([m["x"] - r, m["y"] - r, m["x"] + r, m["y"] + r], fill=emblems.PAPER, outline=emblems.INK, width=SS)
+                r = m["half"]
+                ld.ellipse([m["x"] - r, m["y"] - r, m["x"] + r, m["y"] + r], fill=emblems.INK if r < 4 * SS else emblems.PAPER,
+                           outline=emblems.INK, width=SS)
             if m.get("port"):
                 emblems.draw(ld, "anchor", m["x"] + m["half"] + 8 * SS * m.get("scale", 1.0), m["y"] + m["half"] * 0.4,
                              SS * m.get("scale", 1.0))

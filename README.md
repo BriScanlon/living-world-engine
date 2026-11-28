@@ -351,6 +351,17 @@ only what they know, on that branch and day.
   map symbols and lettering shrink to fit. A double-ruled frame with a graticule border, a compass rose, a scroll
   cartouche and a scale bar in km and miles finish it; the unknown is blank, unexplored parchment (places only
   heard of drawn faded) and the terrain symbols keep clear of the lettering.
+* **Less busy far out:** names appear as you zoom in. On the globe: capitals always, cities from zoom 5, towns from
+  6.5, local places from 9, provinces from 5, seas and gulfs from 3, bays, straits and lakes from 5.5; parchment tiles
+  draw towns from about zoom 7 and thin the terrain far out. On the party map, by how close-in it is (how far apart its
+  towns are drawn): far out only capitals, cities, landmarks, the party's place, realms and seas are named, lesser
+  towns are dots and the terrain is thinner; closer in, town, province, bay and lake names and building lists appear.
+* **Parchment atlas** (#57, `backend/atlas/parchment.py`): the atlas's *look* switch (beside DM / Party view)
+  switches the globe from data colours to **parchment** or **parchment (ink)** from regional zoom (3+): the party map's
+  drawn look as Web Mercator raster tiles (coast, ripples, terrain symbols, rivers, roads, bridges, castles and
+  towns) under the atlas's own realm colours, borders, fog, markers and lettering (in ink on paper), with sea and lake
+  names. Tiles meet seamlessly (fixed cell size per zoom, no wobble or thinning, a margin both neighbours draw alike),
+  take ~1 s each the first time and are cached under the atlas folder (cleared on re-import).
 * **Two looks, and curved realm names** (#57): the party map comes in `colour` (biome and realm washes) or `ink`
   (paper and ink only, like Tolkien's maps: a paper sea with inked ripples, no colour at all). Pick it next to *Party
   map on the table* (or `?style=` / `"style"` on the API); the default is the `PARTY_MAP_STYLE` setting, and a map on
@@ -455,6 +466,7 @@ Interactive docs at `/docs`. Highlights:
 | GET | `/api/world/agent/{id}?branch=&day=` | an agent's epistemic context |
 | GET | `/api/atlas?branch=&day=&compare=&view=dm\|party` | live map state: territory, places, events, rumors (party view: fog of war) |
 | POST | `/api/party/knowledge` | `{place, state: visited\|heard\|unknown, branch, day}`: what the party knows of a place |
+| GET | `/api/atlas/parchment/{slug}/{z}/{x}/{y}.webp?style=` | a parchment raster tile (`colour` or `ink`) |
 | GET · POST | `/api/party/map.webp?branch=&day=&style=` · `/api/party/map-to-table` | the party's overland map (`style`: `colour` or `ink`) · show it on the table |
 | GET | `/api/travel?a=&b=&branch=&day=` | route and days between two things: on foot, horseback, an army, news |
 | GET · POST | `/api/atlas/local-brief?lon=&lat=` · `/api/atlas/local-map` | describe a spot on the globe · paint it (poll `/api/vtt/jobs/{job}/collect`) |

@@ -74,3 +74,11 @@ def test_cliffs_only_where_the_coast_is_high_and_bridges_where_roads_cross_river
     roads = [("roads", LineString([(0, 100), (600, 100)])), ("trails", LineString([(0, 300), (600, 300)])),
              ("searoutes", LineString([(0, 200), (600, 200)]))]
     assert sy.crossings(img, roads, river, 1.0) == 2  # a bridge and a ford; sea lanes don't cross rivers
+
+
+def test_density_thins_the_terrain_far_out():
+    land, avoid = _canvas()
+    cells = _cells(30, 6, step=20)
+    full = len(sy.place(cells, 20, land, avoid, 1.0, seed=4))
+    thin = len(sy.place(cells, 20, land, avoid, 1.0, seed=4, density=0.4))
+    assert 0.25 * full < thin < 0.55 * full

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map as MlMap } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, PartyKnows, PartyMapStyle, PlaceDetail, VttMap } from "../api";
+import { api, AtlasState, AtlasView, Branch, LocalBrief, MapBrief, PaintStatus, AtlasLook, PartyKnows, PartyMapStyle, PlaceDetail, VttMap } from "../api";
 import { accuracyTone, Badge, Button, Card, cx, Empty, ErrorBox, Field, inputCls, Spinner } from "../ui";
 
 let protocolAdded = false;
@@ -21,6 +21,12 @@ const EVENT_COLORS: [string, string][] = [
   ["goal_progress", "#7d8796"],
 ];
 
+/** Place markers by zoom, like their names: capitals and the campaign's own places always, cities from 5, the rest
+ * from 6.5 (#57: far out, only the main places). */
+const PLACE_OPACITY: any = ["step", ["zoom"],
+  ["case", ["any", ["==", ["get", "kind"], "capital"], ["get", "campaign"]], 1, 0], 5,
+  ["case", ["any", ["in", ["get", "kind"], ["literal", ["capital", "city"]]], ["get", "campaign"]], 1, 0], 6.5, 1];
+
 export default function Atlas({ branches }: { branches: Branch[] }) {
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -31,6 +37,8 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
   const [branch, setBranch] = useState("main");
   const [compare, setCompare] = useState(true);
   const [view, setView] = useState<AtlasView>("dm");
+  // the atlas's look: data colours, or the drawn parchment map in colour or ink (#57)
+  const [look, setLook] = useState<AtlasLook>("data");
   const [zoom, setZoom] = useState(0);
   const [tableNote, setTableNote] = useState<string | null>(null);
   const [tableBusy, setTableBusy] = useState(false);
@@ -113,6 +121,50 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     };
   }, []);
 
+  // ------------------------------------------------------------------ the look: data or parchment (#57)
+  useEffect(() => {
+    const map = mapRef.current;
+    const slug = state?.atlas?.slug;
+    if (!map || !ready || !slug || !map.getLayer("parchment")) return;
+    const parchment = look !== "data";
+    if (parchment) {
+      (map.getSource("parchment") as maplibregl.RasterTileSource).setTiles(
+        [`${location.origin}/api/atlas/parchment/${slug}/{z}/{x}/{y}.webp?style=${look === "ink" ? "ink" : "colour"}&v=${state?.atlas?.parchment ?? ""}`]);
+    }
+    map.setLayoutProperty("parchment", "visibility", parchment ? "visible" : "none");
+    for (const id of ["biomes", "rivers", "roads", "sea-lanes"]) {  // drawn into the parchment instead
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", parchment ? "none" : "visible");
+    }
+    if (map.getLayer("province-fill")) {  // realm colours: faint on parchment, fainter still in ink
+      map.setPaintProperty("province-fill", "fill-opacity", look === "ink" ? 0.1 : parchment ? 0.22 : 0.5);
+    }
+    if (map.getLayer("province-line")) map.setLayoutProperty("province-line", "visibility", parchment ? "none" : "visible");
+    if (map.getLayer("places")) {  // the parchment draws castles at capitals: there a marker only needs to be clickable
+      map.setPaintProperty("places", "circle-color", parchment ? "#2a2018" : ["case", ["get", "campaign"], "#f0ad4e", "#e6eaf0"]);
+      map.setPaintProperty("places", "circle-stroke-color", parchment ? "#f1e8cf" : "#0d0f12");
+      map.setPaintProperty("places", "circle-radius", parchment ? ["match", ["get", "kind"], "capital", 6, "city", 3, 2.5]
+        : ["match", ["get", "kind"], "capital", 5, "city", 4, 3]);
+      const shown = parchment ? ["step", ["zoom"], ["case", ["==", ["get", "start"], true], 1, 0], 5, ["case",
+        ["==", ["get", "kind"], "capital"], 0, ["==", ["get", "kind"], "city"], 1, ["==", ["get", "start"], true], 1, 0], 6.5,
+        ["case", ["==", ["get", "kind"], "capital"], 0, 1]] : PLACE_OPACITY;
+      map.setPaintProperty("places", "circle-opacity", shown);
+      map.setPaintProperty("places", "circle-stroke-opacity", shown);
+    }
+    // lettering: ink on paper, or light on the dark data map
+    for (const l of map.getStyle().layers ?? []) {
+      if (l.type !== "symbol" || !l.id.startsWith("label-") || l.id === "label-province") continue;
+      if (l.id.startsWith("label-water")) {
+        map.setPaintProperty(l.id, "text-color", parchment ? (look === "ink" ? "#2e2822" : "#34566e") : "#b9d6ea");
+        map.setPaintProperty(l.id, "text-halo-color", parchment ? "#e8e2cc" : "#0b0f16");
+        continue;
+      }
+      map.setPaintProperty(l.id, "text-color", parchment
+        ? ["case", ["==", ["get", "start"], true], "#8a4a10", "#281e14"]
+        : ["case", ["==", ["get", "start"], true], "#f5c77e", ["get", "campaign"], "#f3d9a8", "#e6eaf0"]);
+      map.setPaintProperty(l.id, "text-halo-color", parchment ? "#f1e8cf" : "#0b0f16");
+    }
+  }, [look, ready, state?.atlas?.slug, view]);
+
   // ------------------------------------------------------------------ static layers (once per atlas)
   useEffect(() => {
     const map = mapRef.current;
@@ -143,6 +195,13 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       id: "biomes", type: "fill", source: src("biomes"), ...srcLayer("biomes"),
       paint: { "fill-color": ["get", "color"], "fill-opacity": 0.75 },
     });
+    // Parchment: the party map's drawn look as raster tiles (atlas/parchment.py); hidden until chosen
+    map.addSource("parchment", {
+      type: "raster", tileSize: 256, minzoom: 3, maxzoom: 11,
+      tiles: [`${location.origin}/api/atlas/parchment/${a.slug}/{z}/{x}/{y}.webp?style=colour&v=${a.parchment ?? ""}`],
+    });
+    map.addLayer({ id: "parchment", type: "raster", source: "parchment", minzoom: 3, layout: { visibility: "none" },
+      paint: { "raster-fade-duration": 150 } });
     map.addLayer({
       id: "province-fill", type: "fill", source: src("provinces"), ...srcLayer("provinces"),
       paint: { "fill-color": ["coalesce", ["feature-state", "color"], "rgba(0,0,0,0)"], "fill-opacity": 0.5 },
@@ -198,7 +257,7 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     // once zoomed in a little; in the party view only the provinces the party knows are named
     map.addSource("province-labels", { type: "geojson", data: empty });
     map.addLayer({
-      id: "label-province", type: "symbol", source: "province-labels", minzoom: 3.2,
+      id: "label-province", type: "symbol", source: "province-labels", minzoom: 6,
       layout: {
         "text-field": ["upcase", ["get", "name"]], "text-font": ["Noto Sans Italic"], "text-size": 10,
         "text-letter-spacing": 0.15, "text-max-width": 8, "text-padding": 6, "symbol-sort-key": 10,
@@ -208,6 +267,32 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         "text-opacity": ["case", ["==", ["get", "known"], "heard"], 0.5, 0.8],
       },
     });
+    // Seas, gulfs, bays, straits and lakes (atlas/waters.py): slanted, spaced, sea-blue (DM view)
+    map.addSource("waters", { type: "geojson", data: empty });
+    fetch(`${location.origin}${api.atlasFile(a.slug, "waters.geojson")}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((fc: GeoJSON.FeatureCollection | null) => {
+        if (!fc) return;
+        const pts = fc.features.filter((f) => f.properties?.label).map((f) => ({
+          type: "Feature" as const, properties: f.properties,
+          geometry: { type: "Point" as const, coordinates: f.properties!.label as number[] },
+        }));
+        (map.getSource("waters") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: pts });
+      })
+      .catch(() => undefined);
+    const waterLabel = (id: string, kinds: string[], minzoom: number) => map.addLayer({
+      id, type: "symbol", source: "waters", minzoom, filter: ["in", ["get", "kind"], ["literal", kinds]],
+      layout: {
+        "text-field": ["case", ["==", ["get", "kind"], "lake"], ["get", "name"], ["upcase", ["get", "name"]]],
+        "text-font": ["Noto Sans Italic"],
+        "text-size": ["match", ["get", "kind"], "sea", 15, "gulf", 12, 11],
+        "text-letter-spacing": ["case", ["==", ["get", "kind"], "lake"], 0.05, 0.3], "text-max-width": 14,
+        "symbol-sort-key": 20,
+      },
+      paint: { "text-color": "#b9d6ea", "text-halo-color": "#0b0f16", "text-halo-width": 1, "text-opacity": 0.9 },
+    });
+    waterLabel("label-water", ["sea", "gulf"], 3);
+    waterLabel("label-water-small", ["bay", "strait", "lake"], 5.5);
     map.addLayer({
       id: "route", type: "line", source: "route",
       layout: { "line-cap": "round", "line-join": "round" },
@@ -223,6 +308,8 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
         "circle-radius": ["match", ["get", "kind"], "capital", 5, "city", 4, 3],
         "circle-color": ["case", ["get", "campaign"], "#f0ad4e", "#e6eaf0"],
         "circle-stroke-color": "#0d0f12", "circle-stroke-width": 1.2,
+        // markers appear as you zoom in, like their names: capitals and the campaign's own places always
+        "circle-opacity": PLACE_OPACITY, "circle-stroke-opacity": PLACE_OPACITY,
       },
     });
     map.addLayer({
@@ -264,9 +351,9 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
       paint: { "text-color": "#f3ead2", "text-opacity": 0.85, "text-halo-color": "#0b0f16", "text-halo-width": 1.2 },
     });
     const notStart = ["!=", ["get", "start"], true];  // the start town has its own (capital) label
-    placeLabel("label-local", ["all", notStart, ["!", ["in", ["get", "kind"], ["literal", ["continent", "capital", "city", "town"]]]]], 8, 11);
-    placeLabel("label-town", ["all", notStart, ["==", ["get", "kind"], "town"]], 4.5, 11);
-    placeLabel("label-city", ["all", notStart, ["==", ["get", "kind"], "city"]], 3, 12);
+    placeLabel("label-local", ["all", notStart, ["!", ["in", ["get", "kind"], ["literal", ["continent", "capital", "city", "town"]]]]], 9, 11);
+    placeLabel("label-town", ["all", notStart, ["==", ["get", "kind"], "town"]], 6.5, 11);
+    placeLabel("label-city", ["all", notStart, ["==", ["get", "kind"], "city"]], 5, 12);
     placeLabel("label-capital", ["any", ["==", ["get", "kind"], "capital"], ["==", ["get", "start"], true]], 0, 12.5,
       "Noto Sans Medium");
     const pick = (layer: string) => (e: maplibregl.MapLayerMouseEvent) => {
@@ -399,18 +486,30 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
                 </button>
               ))}
             </div>
+<div className="inline-flex rounded-lg bg-ink-800 p-0.5 ring-1 ring-ink-700" title="The globe's look: data colours, or the drawn parchment map, in colour or ink (from regional zoom)">
+              {([["data", "Data"], ["colour", "Parchment"], ["ink", "Ink"]] as const).map(([v, label]) => (
+                <button key={v} type="button"
+                  className={cx("rounded-md px-2.5 py-1 text-xs font-medium", look === v ? "bg-amber-500 text-ink-950" : "text-ink-300 hover:text-ink-100")}
+                  onClick={() => setLook(v)}>
+                  {label}
+                </button>
+              ))}
+            </div>
             {view === "party" && (
               <>
                 <Button variant="primary" disabled={tableBusy || !state?.party?.name} onClick={partyToTable}
                   title="Draw this view as an overland map and show it on the players' table">
                   {tableBusy ? <Spinner /> : "▶"} Party map on the table
                 </Button>
-                <select className="rounded bg-ink-800 px-1.5 py-1 text-xs" value={mapStyle}
-                  onChange={(e) => setMapStyle(e.target.value as PartyMapStyle)}
-                  title="Colour washes, or paper and ink only like Tolkien's maps">
-                  <option value="colour">colour</option>
-                  <option value="ink">ink</option>
-                </select>
+    <div className="inline-flex rounded-lg bg-ink-800 p-0.5 ring-1 ring-ink-700" title="The party map's look: colour washes, or paper and ink only like Tolkien's maps">
+                  {([["colour", "Colour"], ["ink", "Ink"]] as const).map(([v, label]) => (
+                    <button key={v} type="button"
+                      className={cx("rounded-md px-2.5 py-1 text-xs font-medium", mapStyle === v ? "bg-amber-500 text-ink-950" : "text-ink-300 hover:text-ink-100")}
+                      onClick={() => setMapStyle(v)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <a className="text-xs text-ember-300 hover:underline" href={api.partyMapUrl(branch, day, mapStyle)} target="_blank" rel="noreferrer">preview</a>
               </>
             )}
