@@ -108,7 +108,7 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
 - **Terrain symbols** (#55, `atlas/symbols.py`): `kinds_for(h, b)` maps a relief cell to symbol kinds and densities
   (mountain h>=66, hill 50-66, downs 40-50 on open ground, forests/ground by biome); `place` scatters them per cell
   at fixed pixel sizes (`SIZE`, `SPACING`; capped by `budget`), keeping off the `avoid` mask (rivers, roads, towns)
-  and inside the land mask; `cliffs` and `crossings` add coast hachures and bridges/fords. The party map builds the
+  and inside the land mask; `cliffs` and `crossings` add coast hachures and bridges/fords. The party map (symbols at `SYMBOL_SCALE` 0.6) builds the
   avoid mask, draws symbols, then rivers and roads over them. Unknown fog is alpha 253 so no ink shows through.
 - **Detailed coasts** (#62, `AzgaarWorld.layers(detail=True)`, setting `atlas_coast_detail`): `land.geojson` is the
   smoothed cell coast + midpoint-displacement detail (`cartography.detailed_coast`, km frame, seeded by map position,

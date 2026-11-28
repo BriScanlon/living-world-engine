@@ -28,6 +28,7 @@ SEA, SHALLOW, RIPPLE = (128, 164, 176), (176, 204, 204), (86, 122, 134)
 LAND, BORDER, COAST, LANE = (233, 218, 180), (104, 74, 96), (78, 58, 38), (236, 244, 246)
 RIVER, ROAD, INK = (79, 127, 166), (122, 90, 51), (40, 30, 20)
 FOG = (16, 20, 28)
+SYMBOL_SCALE = 0.6  # terrain symbols at 60% of their base size: fine detail, like a printed map
 FOG_UNKNOWN, FOG_HEARD = 253, 120  # fog alpha over the unknown (opaque enough that no ink shows) and the heard-of
 
 
@@ -276,7 +277,7 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
         adraw.ellipse([x - 16 * SS, y - 16 * SS, x + 16 * SS, y + 16 * SS], fill=255)
     cells = _relief_px(proj, relief)
     if len(cells):
-        symbols.draw(img, symbols.place(cells, cell, mask, avoid, SS, seed))
+        symbols.draw(img, symbols.place(cells, cell, mask, avoid, SS * SYMBOL_SCALE, seed))
     draw = ImageDraw.Draw(img, "RGBA")
     for ln, pts in river_lines:
         carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, RIVER + (255,))
