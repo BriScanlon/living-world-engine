@@ -129,9 +129,37 @@ def test_party_map_renders_what_the_party_knows(world):
     assert img.format == "WEBP" and img.size == (2560, 1440)
     assert meta["party"] == "The Lantern Company" and meta["provinces"]["visited"] >= 1
     assert meta["places"]["visited"] >= 2 and meta["where"]
-    # fog: the corners of the map (far from anything known) are near-black, the party's town is not
-    px = img.convert("RGB")
-    assert max(px.getpixel((5, 5))) < 50
+    # fog: far from anything known the map is blank, unexplored parchment: light, and no ink shows through it
+    import numpy as np
+    grey = np.asarray(img.convert("L"), dtype=float)
+    unknown = grey[700:760, 120:180]
+    assert unknown.mean() > 150 and unknown.std() < 15
+
+
+def test_party_map_letters_only_what_the_party_knows(world, monkeypatch):
+    """No name the party hasn't learned reaches the map (#56): every label is a known place, province or realm."""
+    from atlas import frame, party_map
+    from atlas.service import atlas_state
+    lettered: list[str] = []
+    real_draw = frame.Labels.draw
+
+    def capture(self, img):
+        lettered.extend(l.text for l in self.placed)
+        real_draw(self, img)
+    monkeypatch.setattr(frame.Labels, "draw", capture)
+    party_map.render(world, day=14)
+    st = atlas_state(world, "main", 14, None, "party")
+    known = {f["properties"]["name"] for f in st["places"]["features"]}
+    known |= {p["name"] for p in st["provinces"].values() if p.get("known") and p.get("name")}
+    known |= {p["controller_name"] for p in st["provinces"].values() if p.get("known") and p.get("controller_name")}
+    plain = lambda s: "".join(s.split()).lower()  # noqa: E731  (spaced capitals compare as plain words)
+    names = {plain(n) for n in known}
+    assert lettered
+    for text in lettered:
+        if "is here" in text:
+            continue
+        parts = [p.replace("(heard of)", "").strip() for p in text.split("·")]
+        assert all(plain(p) in names or p.startswith("+") for p in parts), text
 
 
 def test_party_map_on_the_table_replaces_the_old_one_and_redraws_itself(world, monkeypatch):
