@@ -17,13 +17,15 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image, ImageDraw
 
-INK = (58, 42, 28, 255)
+# Ink on paper, as on Tolkien's maps: symbols are outlined and shaded with fine strokes, filled only with the paper
+# colour (so they hide what is behind them), never coloured in.
+INK = (40, 30, 22, 255)
 PAPER = (238, 228, 198, 255)
 SNOW = (246, 244, 238, 255)
-LEAF = (196, 210, 156, 255)
-PINE = (150, 174, 128, 255)
-JUNGLE = (150, 186, 118, 255)
-WATER_INK = (74, 108, 128, 220)
+LEAF = PAPER
+PINE = PAPER
+JUNGLE = PAPER
+WATER_INK = INK
 
 # relief thresholds (Azgaar heights: 20 = sea level, 100 = highest)
 MOUNTAIN, HILL, DOWNS = 66, 50, 40
@@ -32,10 +34,11 @@ FOREST = {5: "jungle", 6: "broadleaf", 7: "jungle", 8: "mixed", 9: "pine"}
 GROUND = {1: "desert", 2: "waste", 3: "savanna", 4: "plains", 10: "heath", 11: "ice", 12: "marsh"}
 
 # per kind: symbol size and spacing (both in base pixels, scaled by the renderer's supersampling)
-SIZE = {"mountain": 26, "hill": 18, "downs": 16, "broadleaf": 11, "pine": 12, "jungle": 11, "palm": 12, "mixed": 11,
+SIZE = {"mountain": 24, "hill": 14, "downs": 16, "broadleaf": 8, "pine": 10, "jungle": 8, "palm": 11, "mixed": 8,
         "marsh": 9, "plains": 8, "savanna": 10, "heath": 7, "desert": 8, "dune": 10, "waste": 9, "ice": 10}
-SPACING = {"mountain": 0.85, "hill": 0.85, "downs": 1.4, "broadleaf": 0.62, "pine": 0.6, "jungle": 0.55,
-           "mixed": 0.6, "marsh": 1.5, "plains": 2.6, "savanna": 2.4, "heath": 2.2, "desert": 2.0, "waste": 2.2,
+# mountains overlap into chains and trees pack into dense woods
+SPACING = {"mountain": 0.55, "hill": 0.75, "downs": 1.4, "broadleaf": 0.5, "pine": 0.5, "jungle": 0.45,
+           "mixed": 0.5, "marsh": 1.4, "plains": 2.6, "savanna": 2.4, "heath": 2.2, "desert": 2.0, "waste": 2.2,
            "ice": 1.8}
 
 
@@ -50,37 +53,62 @@ class Symbol:
 
 # --------------------------------------------------------------------------- the glyphs
 def _w(s: float) -> int:
-    return max(1, round(s / 20))
+    return max(1, round(s / 26))
 
 
 def _hatch(s: float) -> int:
-    return max(1, round(s / 34))
+    return max(1, round(s / 44))
+
+
+def _along(pts: list[tuple[float, float]], step: float) -> list[tuple[float, float]]:
+    """Points every ``step`` along a polyline."""
+    out, left = [], step / 2
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        seg = math.hypot(x1 - x0, y1 - y0)
+        while left <= seg:
+            k = left / seg
+            out.append((x0 + (x1 - x0) * k, y0 + (y1 - y0) * k))
+            left += step
+        left -= seg
+    return out
 
 
 def mountain(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random, snow: bool = False) -> None:
-    h, w = s * r.uniform(0.85, 1.15), s * r.uniform(0.62, 0.8)
-    px = x + r.uniform(-0.12, 0.12) * w
-    peak, left, right = (px, y - h), (x - w, y), (x + w, y)
-    d.polygon([left, peak, right], fill=SNOW if snow else PAPER)
-    lw = _w(s)
-    d.line([left, peak, right], fill=INK, width=lw, joint="curve")
-    n = 5
-    for i in range(1, n):  # light hatching down the shadowed (east) flank
-        t = i / n
-        a = (peak[0] + (right[0] - peak[0]) * t, peak[1] + (right[1] - peak[1]) * t)
-        d.line([a, (a[0] - w * 0.22, min(y, a[1] + h * 0.22))], fill=INK, width=_hatch(s))
-    d.line([(px, y - h), (px - w * 0.06, y - h * 0.6)], fill=INK, width=_hatch(s))  # a ridge line
+    """A jagged peak in profile, often with a lower second summit; no base line; the shadowed (east) side filled with
+    fine strokes running down the slope."""
+    h, w = s * r.uniform(0.9, 1.25), s * r.uniform(0.42, 0.58)
+    px = x + r.uniform(-0.15, 0.15) * w
+    left = [(x - w, y)]
+    for t in (0.35, 0.68):  # a jag or two up the lit side
+        left.append(((x - w) + (px - (x - w)) * t + r.uniform(-0.05, 0.05) * s, y - h * t + r.uniform(-0.03, 0.05) * s))
+    peak = (px, y - h)
+    right: list[tuple[float, float]] = []
+    top = peak
+    if r.random() < 0.6:  # a notch, then a lower summit
+        right += [(px + w * 0.32, y - h * r.uniform(0.55, 0.65)), (px + w * 0.55, y - h * r.uniform(0.68, 0.8))]
+        top = right[-1]
+    right.append((top[0] + (x + w - top[0]) * 0.5 + r.uniform(-0.04, 0.04) * s, top[1] + (y - top[1]) * 0.55))
+    right.append((x + w, y))
+    outline = left + [peak] + right
+    d.polygon(outline, fill=SNOW if snow else PAPER)
+    d.line(outline, fill=INK, width=_w(s), joint="curve")
+    for qx, qy in _along([peak] + right, s / 9):  # fine strokes down the shadowed slope, towards the foot
+        tx, ty = qx - (qx - px) * 0.6, y
+        k = r.uniform(0.35, 0.55)
+        d.line([(qx, qy), (qx + (tx - qx) * k, qy + (ty - qy) * k)], fill=INK, width=_hatch(s))
+    d.line([peak, (px - w * 0.05, y - h * 0.5)], fill=INK, width=_hatch(s))  # the ridge down from the summit
 
 
 def hill(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random) -> None:
-    w, h = s * r.uniform(0.6, 0.78), s * r.uniform(0.32, 0.42)
-    pts = [(x + w * math.cos(a), y - h * math.sin(a)) for a in np.linspace(math.pi, 0, 14)]
-    d.polygon(pts + [(x + w, y)], fill=PAPER)
+    """A small dome, no base line, with a few strokes on its shadowed side."""
+    w, h = s * r.uniform(0.48, 0.62), s * r.uniform(0.32, 0.42)
+    pts = [(x + w * math.cos(a), y - h * math.sin(a)) for a in np.linspace(math.pi, 0, 16)]
+    d.polygon(pts, fill=PAPER)
     d.line(pts, fill=INK, width=_w(s), joint="curve")
-    for k in (0.35, 0.6):
-        a = math.pi * (0.5 - k * 0.45)
-        p = (x + w * math.cos(a) * 0.9, y - h * math.sin(a) * 0.9)
-        d.line([p, (p[0] - s * 0.08, p[1] + h * 0.45)], fill=INK, width=_hatch(s))
+    for k in (0.18, 0.32, 0.46):
+        a = math.pi * k
+        q = (x + w * math.cos(a) * 0.95, y - h * math.sin(a) * 0.95)
+        d.line([q, (q[0] - w * 0.12, q[1] + h * 0.42)], fill=INK, width=_hatch(s))
 
 
 def downs(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random) -> None:
@@ -90,23 +118,25 @@ def downs(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random
 
 
 def broadleaf(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random, fill=LEAF) -> None:
+    """A round crown on a short stem, the way woods are drawn as masses of little trees."""
     rr = s * r.uniform(0.3, 0.38)
-    cx, cy = x + r.uniform(-0.05, 0.05) * s, y - s * 0.5
-    d.line([(x, y), (x, cy + rr * 0.6)], fill=INK, width=_w(s))
-    for dx, dy, k in ((-0.45, 0.15, 0.75), (0.45, 0.15, 0.75), (0, -0.25, 0.85), (0, 0.1, 1.0)):
-        q = rr * k
-        bx, by = cx + dx * rr, cy + dy * rr
-        d.ellipse([bx - q, by - q, bx + q, by + q], fill=fill, outline=INK, width=max(1, _w(s) - 1))
+    cx, cy = x + r.uniform(-0.05, 0.05) * s, y - s * 0.58
+    d.line([(x, y), (x, cy + rr * 0.8)], fill=INK, width=_w(s))
+    pts = [(cx + rr * (1 + r.uniform(-0.08, 0.08)) * math.cos(a), cy + rr * (1 + r.uniform(-0.08, 0.08)) * math.sin(a))
+           for a in np.linspace(0, 2 * math.pi, 13)[:-1]]
+    d.polygon(pts, fill=fill, outline=INK, width=_w(s))
+    d.arc([cx - rr * 0.6, cy - rr * 0.6, cx + rr * 0.6, cy + rr * 0.6], 300, 60, fill=INK, width=_hatch(s))  # shade
 
 
 def pine(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random) -> None:
-    h, w = s * r.uniform(0.85, 1.05), s * r.uniform(0.2, 0.26)
-    top = y - h
-    d.line([(x, y), (x, y - h * 0.2)], fill=INK, width=_w(s))
-    for k, (t0, t1) in enumerate(((0.0, 0.5), (0.25, 0.75), (0.5, 0.82))):  # three tiers, widest at the bottom
-        ww = w * (1.0 - k * 0.22)
-        a, b = top + h * t0, top + h * t1
-        d.polygon([(x, a), (x + ww, b), (x - ww, b)], fill=PINE, outline=INK, width=max(1, _w(s) - 1))
+    """A narrow spire on a stem, with a few branch strokes."""
+    h, w = s * r.uniform(0.85, 1.05), s * r.uniform(0.16, 0.22)
+    top, foot = (x, y - h), y - h * 0.18
+    d.line([(x, y), (x, foot)], fill=INK, width=_w(s))
+    d.polygon([top, (x + w, foot), (x - w, foot)], fill=PINE, outline=INK, width=_w(s))
+    for k in (0.4, 0.62):
+        yy = top[1] + (foot - top[1]) * k
+        d.line([(x, yy - h * 0.05), (x + w * k * 1.1, yy + h * 0.05)], fill=INK, width=_hatch(s))
 
 
 def palm(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random) -> None:
@@ -126,8 +156,8 @@ def tuft(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random,
 
 
 def reeds(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random) -> None:
-    tuft(d, x, y, s * 1.15, r, n=4)
-    for dy, w in ((s * 0.18, 0.55), (s * 0.36, 0.35)):  # standing water below
+    tuft(d, x, y, s * 1.0, r, n=3)
+    for dy, w in ((s * 0.16, 0.6), (s * 0.32, 0.4)):  # standing water below
         d.line([(x - s * w, y + dy), (x + s * w, y + dy)], fill=WATER_INK, width=max(1, _w(s) - 1))
 
 
@@ -162,7 +192,7 @@ def crack(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random
 def ice(d: ImageDraw.ImageDraw, x: float, y: float, s: float, r: random.Random) -> None:
     for i in range(3):
         o = (i - 1) * s * 0.28
-        d.line([(x + o - s * 0.2, y), (x + o + s * 0.2, y - s * 0.3)], fill=(110, 130, 150, 255), width=max(1, _w(s) - 1))
+        d.line([(x + o - s * 0.2, y), (x + o + s * 0.2, y - s * 0.3)], fill=INK, width=_hatch(s))
     if r.random() < 0.4:  # a crevasse
         d.arc([x - s * 0.5, y - s * 0.1, x + s * 0.5, y + s * 0.3], 200, 340, fill=INK, width=max(1, _w(s) - 1))
 
@@ -241,7 +271,7 @@ def kinds_for(h: int, b: int) -> list[tuple[str, float]]:
 
 
 def place(cells: np.ndarray, cell_px: float, land: Image.Image, avoid: Image.Image, scale: float, seed: int,
-          budget: int = 45000) -> list[Symbol]:
+          budget: int = 80000) -> list[Symbol]:
     """Symbols for relief cells ``cells`` (rows of x, y, h, b in pixels), ``cell_px`` apart, at ``scale`` x their base
     size. A symbol is kept only where ``land`` is set and ``avoid`` (roads, rivers, towns) is not, at its foot and
     beside it. Back to front (by y)."""
