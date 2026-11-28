@@ -294,8 +294,20 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
 
     land_cells = [i for i in range(n) if land[i]]
     habitable = [i for i in land_cells if biome[i] not in (10, 11) and sizes.get(feature[i], 0) >= 30]
-    cult_centers = farthest(habitable, len(culture_list))
-    culture = grow({c: k + 1 for k, c in enumerate(cult_centers)}, lambda c: land[c], lambda c: 1.0)
+    if mesh == "voronoi":  # peoples and polities placed by geography (#42)
+        from atlas.worldgen import polities as wg_pol
+        expansion = [round(rng.uniform(0.8, 2.2), 2) for _ in range(n_states)]
+        cell_km2 = math.sqrt(3) / 2 * (cell_km if region else radius * math.sqrt(3)) ** 2
+        pol = wg_pol.build(np.asarray(centers, dtype=float), nbrs, h, biome, hydro.flux, hydro.harbor, rng,
+                           n_cultures=len(culture_list), n_states=n_states, expansionism=expansion,
+                           spacing_px=TOWN_SPACING_KM / km_px if region else 5 * radius,
+                           max_towns=max_towns if region else 60, province_cells=PROVINCE_KM2 / cell_km2)
+        cult_centers, culture = pol.culture_centers, pol.culture
+        while len(cult_centers) < len(culture_list):  # fewer habitable spots than peoples: share a homeland
+            cult_centers = cult_centers + cult_centers[:1]
+    else:
+        cult_centers = farthest(habitable, len(culture_list))
+        culture = grow({c: k + 1 for k, c in enumerate(cult_centers)}, lambda c: land[c], lambda c: 1.0)
     for f in sizes:  # islands unreached by any culture
         pass
     cultures = [{"i": 0, "name": "Wildlands", "base": 0}] + [
@@ -303,14 +315,17 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
         for k, nm in enumerate(culture_list)]
 
     # ------------------------------------------------------------------ states
-    big = [f for f, s in sizes.items() if s >= 30]
-    caps: list[int] = []
-    for f in sorted(big, key=lambda f: -sizes[f]):
-        share = max(1, round(n_states * sizes[f] / sum(sizes[g] for g in big)))
-        cands = [i for i in habitable if feature[i] == f]
-        caps += farthest(cands, min(share, len(cands)), caps)
-    caps = caps[:n_states]
-    state = grow({c: k + 1 for k, c in enumerate(caps)}, lambda c: land[c], lambda c: BIOME_COST.get(biome[c], 3))
+    if mesh == "voronoi":
+        caps, state = pol.capitals, pol.state
+    else:
+        big = [f for f, s in sizes.items() if s >= 30]
+        caps: list[int] = []
+        for f in sorted(big, key=lambda f: -sizes[f]):
+            share = max(1, round(n_states * sizes[f] / sum(sizes[g] for g in big)))
+            cands = [i for i in habitable if feature[i] == f]
+            caps += farthest(cands, min(share, len(cands)), caps)
+        caps = caps[:n_states]
+        state = grow({c: k + 1 for k, c in enumerate(caps)}, lambda c: land[c], lambda c: BIOME_COST.get(biome[c], 3))
     states: list[dict[str, Any]] = [{"i": 0, "name": "Neutrals", "diplomacy": [], "removed": False}]
     for k, cap in enumerate(caps):
         cul = culture[cap] or 1
@@ -320,6 +335,8 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
                        "capital": 0, "center": cap, "culture": cul, "color": STATE_COLORS[k % 12],
                        "type": "Naval" if any(not land[b2] for b2 in nbrs[cap]) else "Generic",
                        "expansionism": round(rng.uniform(0.8, 2.2), 2)})
+        if mesh == "voronoi":
+            states[-1]["expansionism"] = expansion[k]
 
     # neighbours + diplomacy
     neighbours = {s["i"]: set() for s in states[1:]}
@@ -341,7 +358,18 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     # ------------------------------------------------------------------ provinces
     province = [0] * n
     provinces: list[Any] = [0]
-    for s in states[1:]:
+    if mesh == "voronoi":
+        province = list(pol.province)
+        for k, s in enumerate(states[1:]):
+            s["provinces"] = []
+            for c in pol.province_seeds[k]:
+                pid = len(provinces)
+                pname = _name(rng, (s["culture"] - 1))
+                form = rng.choice(["Province", "County", "March", "Barony", "Shire"])
+                provinces.append({"i": pid, "state": s["i"], "center": c, "burg": 0, "name": pname,
+                                  "formName": form, "fullName": f"{pname} {form}", "color": s["color"]})
+                s["provinces"].append(pid)
+    for s in (states[1:] if mesh != "voronoi" else []):
         cells = [i for i in land_cells if state[i] == s["i"]]
         if region:  # provinces by area, not a fixed few per realm
             cell_km2 = math.sqrt(3) / 2 * cell_km ** 2
@@ -368,22 +396,32 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     burg_of = [0] * n
     burgs: list[Any] = [0]
 
-    def add_burg(cell: int, capital: bool) -> int:
+    def add_burg(cell: int, capital: bool, population: float | None = None, port: int | None = None) -> int:
         bid = len(burgs)
-        port = 1 if any(not land[b2] for b2 in nbrs[cell]) else 0
+        if port is None:
+            port = 1 if any(not land[b2] for b2 in nbrs[cell]) else 0
         burgs.append({"i": bid, "cell": cell, "x": centers[cell][0], "y": centers[cell][1],
                       "name": _name(rng, (culture[cell] or 1) - 1), "state": state[cell],
                       "culture": culture[cell], "capital": 1 if capital else 0, "port": port,
-                      "population": round(rng.uniform(8, 40) if capital else rng.uniform(0.5, 9), 2),
+                      "population": population if population is not None else
+                      round(rng.uniform(8, 40) if capital else rng.uniform(0.5, 9), 2),
                       "type": "Naval" if port else "Generic", "feature": feature[cell]})
         burg_of[cell] = bid
         return bid
 
-    for s in states[1:]:
+    if mesh == "voronoi":
+        cap_set = set(caps)
+        for t, popn, prt in zip(pol.towns, pol.population, pol.port):
+            add_burg(t, t in cap_set, population=popn, port=prt)
+        for s in states[1:]:
+            s["capital"] = burg_of[s["center"]]
+        for p in provinces[1:]:
+            p["burg"] = burg_of[p["center"]]
+    for s in (states[1:] if mesh != "voronoi" else []):
         s["capital"] = add_burg(s["center"], True)
-    for p in provinces[1:]:
+    for p in (provinces[1:] if mesh != "voronoi" else []):
         p["burg"] = burg_of[p["center"]] or add_burg(p["center"], False)
-    extra = [i for i in habitable if not burg_of[i] and state[i]]
+    extra = [i for i in habitable if not burg_of[i] and state[i]] if mesh != "voronoi" else []
     cap_towns = max_towns if region else 18 + len(provinces)
     spacing = TOWN_SPACING_KM / km_px if region else 5 * radius
     for c in sorted(extra, key=lambda c: rng.random()):
@@ -396,7 +434,10 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
     # ------------------------------------------------------------------ religions
     religions = [{"i": 0, "name": "No religion"}] + [
         {"i": k + 1, "name": nm, "type": tp, "color": STATE_COLORS[(k * 5) % 12]} for k, (nm, tp) in enumerate(religion_list)]
-    religion = [0 if not land[i] else 1 + (culture[i] + state[i]) % len(religion_list) for i in range(n)]
+    if mesh == "voronoi":  # a people keeps its faith across borders
+        religion = [0 if not land[i] or not culture[i] else 1 + (culture[i] - 1) % len(religion_list) for i in range(n)]
+    else:
+        religion = [0 if not land[i] else 1 + (culture[i] + state[i]) % len(religion_list) for i in range(n)]
 
     # ------------------------------------------------------------------ routes (roads inside each state)
     def tree(a: int) -> dict[int, int]:
