@@ -201,9 +201,11 @@ A MapLibre GL **globe** of the campaign planet that shows the simulation for any
   other local places from 8, and province names (one per province, at its centre) from 3.2. They collide instead of
   piling up, with the party's start town first, then capitals, cities, towns. Labels on the **far side of the globe
   are not drawn**. In the party view only provinces the party knows are named (heard-of ones fainter).
-* **First run:** with `ATLAS_SAMPLE_ON_STARTUP=true` the backend generates a small sample planet *in Azgaar's Full JSON
-  format* (`backend/atlas/sample_world.py`; hex cells instead of Voronoi), imports it, and places Greywater on a port
-  town as a vassal of the local realm. Azgaar's repo only ships `.map` saves, which don't store cell polygons.
+* **First run:** with `ATLAS_SAMPLE_ON_STARTUP=true` the backend generates the demo region, *Thessaly Reach* (a medium
+  temperate region of continents from the native generator, written in Azgaar's Full JSON format; see
+  [docs/worldgen.md](docs/worldgen.md)), imports it, and places Greywater on a port town as a vassal of the local
+  realm. An existing demo on the old whole-planet sample moves with
+  `docker compose exec backend python /app/scripts/move_demo_to_region.py [--dry-run]`.
 
 ### 5. New-world wizard and campaigns (`backend/wizard/`, `frontend/src/views/NewWorld.tsx`)
 
@@ -256,7 +258,7 @@ documents for the engine.
 **Scale.** A generated world is a region, not a planet: provinces of about 20,000 km² (10–40k), towns 45–65 km
 apart (a day or two on foot), highways between neighbouring capitals (one to three weeks), up to 100 / 200 / 320
 towns and 60 wilds, so even a large region stays within about 1,500 graph documents. The rest of the globe is sea
-beyond the maps. (The first-run demo planet, *Thessaly Reach*, is still the old whole-planet sample.)
+beyond the maps. How each stage works, and its knobs: [docs/worldgen.md](docs/worldgen.md).
 
 Every 🎲 rolls a field; *Surprise me* rolls a whole step. The approach changes the order you answer in; the world is
 always built planet-first because a town needs a planet to sit on.
@@ -445,7 +447,8 @@ broke, wants the docks, fears the Sunken Ledger surfacing — vs **the Ashen Gui
 holds the docks, wants the ledger as blackmail. Wenna Tull keeps the Drowned Lantern neutral;
 Brother Callum wants the Baron exposed; Brand is secretly in debt to the Guild. Four locations plus
 the tavern, two items, a marsh hag, three goal clocks, rumors already circulating, and the party
-(**the Lantern Company**). `sample_data/` has Obsidian notes and session notes to ingest on top.
+(**the Lantern Company**). `sample_data/` has Obsidian notes and session notes to ingest on top. On the atlas,
+Greywater is a port town of the generated region *Thessaly Reach*, and House Vane a vassal of the realm around it.
 
 ---
 

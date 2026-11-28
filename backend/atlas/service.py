@@ -11,7 +11,7 @@ from typing import Any
 
 from atlas import party
 from atlas.azgaar import AzgaarWorld
-from atlas.sample_world import write_sample
+from atlas.sample_world import write_demo_region
 from config import get_settings
 from graph import builders as b
 from graph.store import GraphStore
@@ -120,14 +120,67 @@ def _place_greywater(store: GraphStore, branch: str, world: AzgaarWorld,
                   "realm_name": (by_id.get(realm) or {}).get("name"), "centre": (lon, lat)}
 
 
+DEMO_SLUG = "thessaly-reach"
+GREYWATER_PLACES = {"Location/greywater", "Location/greywater-docks", "Location/vane-manor",
+                    "Location/the-drowned-lantern", "Location/blackfen-marsh"}
+
+
 def bootstrap_sample(store: GraphStore, seed: int = 1795) -> dict[str, Any] | None:
-    """First-run demo: generate the sample planet and import it into main once."""
+    """First-run demo: generate the demo region and import it into main once (Greywater goes on one of its ports)."""
     if store.all_documents("main", doc_type="WorldAtlas"):
         return None
-    path = atlas_root() / "sample" / "sample-world.full.json"
+    path = atlas_root() / "sample" / "demo-region.full.json"
     if not path.exists():
-        write_sample(path, seed)
-    return import_world(store, path, slug="thessaly-reach")
+        write_demo_region(path, seed)
+    return import_world(store, path, slug=DEMO_SLUG)
+
+
+def map_documents(docs: list[dict[str, Any]], slugs: list[str], keep: set[str] = GREYWATER_PLACES) -> set[str]:
+    """Everything an imported map brought (its realms, provinces, towns, people, the WorldAtlas doc), and everything
+    that points at those (edges, marks, a zoom-in spot and its battle-map link...), except the places in ``keep``,
+    which a new map re-places."""
+    drop = {d["@id"] for d in docs if d.get("source_session") in {f"import/azgaar-{s}" for s in slugs}}
+    drop |= {d["@id"] for d in docs if d["@type"] == "WorldAtlas"}
+
+    def refs(d: dict[str, Any]) -> bool:
+        for k, v in d.items():
+            if k in ("@id", "@type"):
+                continue
+            if isinstance(v, str) and v in drop:
+                return True
+            if isinstance(v, list) and any(isinstance(x, str) and x in drop for x in v):
+                return True
+        return False
+
+    while True:
+        more = {d["@id"] for d in docs if d["@id"] not in drop and d["@id"] not in keep and refs(d)}
+        if not more:
+            return drop
+        drop |= more
+
+
+def move_demo_atlas(store: GraphStore, *, branch: str = "main", seed: int = 1795, dry_run: bool = False) -> dict[str, Any]:
+    """Move Greywater from whatever map it sits on to a freshly generated demo region (#44).
+
+    The old map's documents, and whatever points at them, are removed in one commit (TerminusDB keeps them in its
+    history; forecast branches made on the old map are left as they are), then the region is imported and Greywater
+    placed on one of its ports. ``dry_run`` only counts what would go."""
+    docs = store.all_documents(branch)
+    slugs = sorted({d.get("slug") or d["@id"].split("/", 1)[1] for d in docs if d["@type"] == "WorldAtlas"})
+    drop = map_documents(docs, slugs)
+    counts: dict[str, int] = {}
+    for d in docs:
+        if d["@id"] in drop:
+            counts[d["@type"]] = counts.get(d["@type"], 0) + 1
+    out: dict[str, Any] = {"old_maps": slugs, "remove": len(drop), "by_type": counts}
+    if dry_run:
+        return out
+    if drop:
+        store.delete(sorted(drop), branch, f"[atlas] remove the old map ({', '.join(slugs)}): Greywater moves to a region")
+    path = atlas_root() / "sample" / "demo-region.full.json"
+    write_demo_region(path, seed)
+    out["imported"] = import_world(store, path, branch=branch, slug=DEMO_SLUG)
+    return out
 
 
 # =========================================================================== live state
