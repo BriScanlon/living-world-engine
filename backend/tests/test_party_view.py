@@ -205,3 +205,29 @@ def test_party_map_on_the_table_replaces_the_old_one_and_redraws_itself(world, m
     assert len([m for m in library if f"lwe-overland:{world.db}" in m["tags"]]) == 1
     table["map"] = {"id": "battle", "tags": []}
     assert not party_map.refresh_if_shown(world, day=14)  # a battle map is up: leave it
+
+
+def test_the_ink_map_is_paper_and_ink(world):
+    """#57: style="ink" draws paper and ink only, like Tolkien's maps."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from atlas.party_map import render
+    data, meta = render(world, day=14, style="ink")
+    assert meta["style"] == "ink"
+    rgb = np.asarray(Image.open(io.BytesIO(data)).convert("RGB"), dtype=int)
+    sat = rgb.max(axis=2) - rgb.min(axis=2)
+    assert (sat > 70).mean() < 0.01  # hardly any strong colour: only the "you are here" ring and its words
+
+
+def test_the_table_keeps_the_style_it_was_put_up_in(world, monkeypatch):
+    from atlas import party_map
+    from vtt_link import client
+    calls = []
+    monkeypatch.setattr(client, "configured", lambda: True)
+    monkeypatch.setattr(client, "table_state", lambda: {"map": {"tags": [party_map._tag(world), "lwe-style:ink"]}})
+    monkeypatch.setattr(party_map, "to_table", lambda store, branch, day, style=None: calls.append(style) or {})
+    assert party_map.refresh_if_shown(world)
+    assert calls == ["ink"]

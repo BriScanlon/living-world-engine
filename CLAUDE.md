@@ -116,6 +116,11 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
   symbols avoid the lettering): furniture boxes, place symbols (`_lay_out_places`; only capitals, cities, landmarks
   and the party's place reserve a box; symbol and font scale by median town spacing), province names, then realm
   names on their own faint layer. Fog is parchment (`FOG`), aged together with the map; `neatline` paints the margin.
+- **Party map styles** (#57): `party_map.STYLES` (`colour`, `ink`) are palettes for the world section; setting
+  `party_map_style`; `render(..., style=)`, `to_table(..., style=)` tags the VTT map `lwe-style:<style>` and
+  `refresh_if_shown` redraws in it. Realm names use `frame.Labels.add_along` (per-letter positions, angles and boxes;
+  `inside` keeps 85% of letters on the realm), trying the realm's axis (from its minimum rotated rectangle, clamped to
+  ±35°), flatter angles and three sizes.
 - **Named waters** (#57, `atlas/waters.py: find_waters`, run in `AzgaarWorld.layers` on the coast simplified to
   0.02 deg): opening radius `R = 4%` of the map's short side; layer `waters.geojson` holds each water's simplified
   shape with `name`, `kind`, `label` (polylabel) and `width_km`; not tiled, not in the WorldAtlas layer list. The party

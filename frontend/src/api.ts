@@ -370,6 +370,9 @@ const json = (body: unknown): RequestInit => ({
 
 const enc = encodeURIComponent;
 
+/** The party map's look: biome and realm colour washes, or paper and ink only (like Tolkien's maps). */
+export type PartyMapStyle = "colour" | "ink";
+
 export const api = {
   health: () => req<Health>("/health"),
   meta: (branch = "main") => req<Meta>(`/meta?branch=${enc(branch)}`),
@@ -423,9 +426,9 @@ export const api = {
     req<PlaceDetail>(`/atlas/place/${id}?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}&view=${view}`),
   markParty: (body: { place: string; state: "visited" | "heard" | "unknown"; branch: string; day: number | null }) =>
     req<{ place: string; state: string; day: number; changed: boolean; table_refreshed: boolean }>("/party/knowledge", json(body)),
-  partyMapUrl: (branch: string, day: number | null) =>
-    `/api/party/map.webp?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}&t=${Date.now()}`,
-  partyMapToTable: (body: { branch: string; day: number | null }) =>
+  partyMapUrl: (branch: string, day: number | null, style?: PartyMapStyle) =>
+    `/api/party/map.webp?branch=${enc(branch)}${day !== null ? `&day=${day}` : ""}${style ? `&style=${style}` : ""}&t=${Date.now()}`,
+  partyMapToTable: (body: { branch: string; day: number | null; style?: PartyMapStyle }) =>
     req<{ title: string; vtt_map_id: string; replaced: number; places: { visited: number; heard: number } }>(
       "/party/map-to-table", json(body)),
   atlasFile: (slug: string, name: string) => `/api/atlas/files/${slug}/${name}`,

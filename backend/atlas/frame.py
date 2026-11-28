@@ -24,6 +24,8 @@ class Label:
     halo: tuple
     box: tuple[float, float, float, float]
     italic: bool = False
+    glyphs: list | None = None  # lettering along a curve: (char, x, y, angle in degrees) each
+    boxes: list | None = None  # and a box per letter, for collisions
 
 
 @dataclass
@@ -45,8 +47,44 @@ class Labels:
         if b[0] < x0 or b[1] < y0 or b[2] > x1 or b[3] > y1:
             return False
         p = self.pad
-        return not any(b[0] < o[2] + p and b[2] + p > o[0] and b[1] < o[3] + p and b[3] + p > o[1]
-                       for o in [*(l.box for l in self.placed), *self.reserved])
+        others = [o for l in self.placed for o in (l.boxes or [l.box])] + self.reserved
+        return not any(b[0] < o[2] + p and b[2] + p > o[0] and b[1] < o[3] + p and b[3] + p > o[1] for o in others)
+
+    def add_along(self, text: str, font, paths: list[list[tuple[float, float]]], fill, halo,
+                  inside=None, share: float = 0.9) -> Label | None:
+        """Letter ``text`` along the first path (a polyline) it fits on, each letter turned to the path; with
+        ``inside(x, y)``, at least ``share`` of the letters must be inside (a realm's name on its own land)."""
+        import numpy as np
+        adv = [font.getlength(ch) for ch in text]
+        total = sum(adv)
+        for path in paths:
+            pts = np.asarray(path, dtype=float)
+            seg = np.hypot(*np.diff(pts, axis=0).T)
+            cum = np.concatenate([[0.0], np.cumsum(seg)])
+            if cum[-1] < total:
+                continue
+            s, glyphs, boxes = (cum[-1] - total) / 2, [], []
+            for ch, a in zip(text, adv):
+                m = s + a / 2
+                i = min(int(np.searchsorted(cum, m, side="right")) - 1, len(seg) - 1)
+                k = (m - cum[i]) / max(seg[i], 1e-9)
+                x, y = pts[i] + (pts[i + 1] - pts[i]) * k
+                ang = math.degrees(math.atan2(pts[i + 1][1] - pts[i][1], pts[i + 1][0] - pts[i][0]))
+                glyphs.append((ch, float(x), float(y), ang))
+                if ch.strip():
+                    r = max(a, font.size * 0.7) * 0.55
+                    boxes.append((x - r, y - font.size * 0.55, x + r, y + font.size * 0.55))
+                s += a
+            letters = [(x, y) for ch, x, y, _ in glyphs if ch.strip()]
+            if inside is not None and sum(inside(x, y) for x, y in letters) < share * len(letters):
+                continue
+            if boxes and all(self.free(b) for b in boxes):
+                lab = Label(text, font, glyphs[0][1:3], "mm", fill, halo,
+                            (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes),
+                             max(b[3] for b in boxes)), glyphs=glyphs, boxes=boxes)
+                self.placed.append(lab)
+                return lab
+        return None
 
     def add(self, text: str, font, candidates: list[tuple[float, float, str]], fill, halo,
             italic: bool = False) -> Label | None:
@@ -69,10 +107,24 @@ class Labels:
         d = ImageDraw.Draw(img, "RGBA")
         for l in self.placed:
             stroke = max(2, getattr(l.font, "size", 16) // 8)
-            if l.italic:
+            if l.glyphs:
+                _along(img, l, stroke)
+            elif l.italic:
                 _slanted(img, l, stroke)
             else:
                 d.text(l.xy, l.text, font=l.font, fill=l.fill, anchor=l.anchor, stroke_width=stroke, stroke_fill=l.halo)
+
+
+def _along(img: Image.Image, l: Label, stroke: int) -> None:
+    n = int(l.font.size * 2.2)
+    for ch, x, y, ang in l.glyphs:
+        if not ch.strip():
+            continue
+        tile = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+        ImageDraw.Draw(tile).text((n / 2, n / 2), ch, font=l.font, fill=l.fill, anchor="mm", stroke_width=stroke,
+                                  stroke_fill=l.halo)
+        tile = tile.rotate(-ang, resample=Image.BICUBIC)
+        img.alpha_composite(tile, (int(x - n / 2), int(y - n / 2)))
 
 
 SLANT = 0.22  # how far italic lettering leans (DejaVu Serif has no italic face, so the text is sheared)

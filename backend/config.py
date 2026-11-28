@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     tippecanoe_bin: str = "tippecanoe"
     # Imported coasts get fractal detail down to ~100 m (coves and headlands that appear as you zoom in, #62)
     atlas_coast_detail: bool = True
+    # The party map's look: "colour" (biome and realm washes) or "ink" (paper and ink only, like Tolkien's maps)
+    party_map_style: str = "colour"
 
     # Virtual tabletop (vtt/): where the world engine sends maps and scenes. Empty = not linked.
     vtt_url: str = ""
