@@ -108,11 +108,17 @@ def test_journeys_in_a_medium_region_take_days_not_months(tmp_path, monkeypatch)
         sample = towns[::5]  # 40-odd towns is plenty, and keeps the test quick; neighbours come from all towns
         assert 1 <= statistics.median(nearest_days(sample, towns)) <= 4
         cap_days = nearest_days(caps, caps)
-        # 5-20 days on one landmass; up to ~25 when neighbouring capitals sit across a strait (no sea lanes until
-        # phase 5, #43, so those trips go cross-country or by sea without a route)
-        assert 5 <= statistics.median(cap_days) <= 25 and max(cap_days) <= 40
+        # highways join neighbouring capitals, and sea lanes (#43) those across a strait
+        assert 5 <= statistics.median(cap_days) <= 20 and max(cap_days) <= 40
         # an army marching between neighbouring capitals: weeks, not the year-long marches of the old planet
-        assert statistics.median(nearest_days(caps, caps, "army")) <= 50  # tighten with sea lanes (phase 5, #43)
+        assert statistics.median(nearest_days(caps, caps, "army")) <= 40
+        # on long trips the roads beat going straight across country
+        far = [(a, b) for a in sample for b in sample if haversine_km((a["lon"], a["lat"]), (b["lon"], b["lat"])) > 500][:12]
+        from atlas.travel import route as travel_route
+        for a, b in far:
+            r = t.between(a["@id"], b["@id"])
+            straight = travel_route((a["lon"], a["lat"]), (b["lon"], b["lat"]))
+            assert r.days("foot") <= straight.days("foot") and r.road_km + r.sea_km > 0
     finally:
         st._root().delete_database(st.db, team=st.team, force=True)
         get_settings.cache_clear()

@@ -44,7 +44,7 @@ backend/
             worldgen/ (native generation, epic #45: mesh.py Voronoi cells, terrain.py heightmap + plates,
             water.py priority-flood lakes, drainage, rivers + tributaries, harbours, climate.py temperature,
             wind-borne rain with rain shadows, Whittaker biomes, polities.py habitability, cultures, realms,
-            towns + ports, balanced provinces),
+            towns + ports, balanced provinces, routes.py roads/trails/highways and sea lanes),
             service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
   wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step),

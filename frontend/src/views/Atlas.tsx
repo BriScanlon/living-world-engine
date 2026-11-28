@@ -164,7 +164,18 @@ export default function Atlas({ branches }: { branches: Branch[] }) {
     });
     map.addLayer({
       id: "roads", type: "line", source: src("roads"), ...srcLayer("roads"), minzoom: 3,
-      paint: { "line-color": "#6b4f2a", "line-width": 1, "line-dasharray": [3, 2], "line-opacity": 0.8 },
+      filter: ["!=", ["get", "group"], "searoutes"],
+      paint: {
+        "line-color": ["match", ["get", "group"], "highways", "#7a2d1e", "trails", "#8a6a3f", "#6b4f2a"],
+        "line-width": ["match", ["get", "group"], "highways", 1.8, "trails", 0.7, 1],
+        "line-dasharray": [3, 2], "line-opacity": 0.8,
+      },
+    });
+    // Sea lanes between ports: sailed, not walked (atlas/travel.py)
+    map.addLayer({
+      id: "sea-lanes", type: "line", source: src("roads"), ...srcLayer("roads"), minzoom: 3,
+      filter: ["==", ["get", "group"], "searoutes"],
+      paint: { "line-color": "#cfe6ff", "line-width": 1, "line-dasharray": [1, 2], "line-opacity": 0.75 },
     });
     // Party view: fog over provinces the party doesn't know (0 seen, 1 heard of, 2 unknown)
     map.addLayer({
