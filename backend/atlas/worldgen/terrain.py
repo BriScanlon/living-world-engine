@@ -7,7 +7,7 @@
   boundaries are convergent, and land near them rises in ranges that fade with distance and are broken up by ridged
   noise, so mountains run across continents as chains instead of sitting in their middles as domes.
 * **Sea level** is the height quantile that gives the shape's sea share. A fall-off near the map frame keeps island
-  worlds surrounded by sea, while letting continents run off the edge of a regional map.
+  worlds surrounded by sea; every shape also ends in a ragged band of sea at the frame, so no coast is cut straight.
 * **Coastline clean-up:** one-cell islets sink and one-cell inlets fill.
 """
 from __future__ import annotations
@@ -117,6 +117,7 @@ def heightmap(centers: list[tuple[float, float]], nbrs: list[list[int]], width: 
     # the map frame: island worlds stay surrounded by sea; continents may run off a regional map's edge
     d = np.minimum.reduce([xy[:, 0], width - xy[:, 0], xy[:, 1], height - xy[:, 1]]) / (0.12 * min(width, height))
     v = v * (1 - edge_falloff + edge_falloff * np.clip(d, 0, 1))
+    v = v * frame_margin(xy, width, height)
     thr = float(np.quantile(v, sea_share))
     land = _clean_coast(v >= thr, nbrs)
     # relief: gentle rise inland, ranges along convergent plate boundaries, broken up by ridged noise
@@ -128,6 +129,25 @@ def heightmap(centers: list[tuple[float, float]], nbrs: list[list[int]], width: 
     sea_depth = np.clip((thr - v) / max(thr - v.min(), 1e-9), 0, 1)
     h = np.where(land, SEA_LEVEL + np.round(relief * 80), np.round((1 - sea_depth) * (SEA_LEVEL - 1)))
     return [int(min(100, max(0, x))) for x in h]
+
+
+def frame_margin(xy: np.ndarray, width: float, height: float, share: float = 0.06) -> np.ndarray:
+    """0 at the map frame, 1 inland: every shape ends in sea, so no coast is cut straight by the region's edge (#60).
+
+    Distance to the frame is measured through a warp of low-frequency noise and with rounded corners, so the coasts
+    it shapes bow and wander instead of running parallel to the frame; the warp's reach is taken off first, so the
+    frame itself is always sea. The noise has its own generator (from the mesh, not the world's ``rng``), so worlds
+    that never reached the frame come out much as before."""
+    own = np.random.default_rng(int(abs(float(xy[:16].sum())) * 1000) & 0xFFFFFFFF)
+    short = min(width, height)
+    warp = 0.05 * short
+    wx = xy[:, 0] + warp * (2 * fbm(xy, width, height, own, octaves=4, base=5, gain=0.6) - 1)
+    wy = xy[:, 1] + warp * (2 * fbm(xy, width, height, own, octaves=4, base=5, gain=0.6) - 1)
+    dx, dy = width / 2 - np.abs(wx - width / 2), height / 2 - np.abs(wy - height / 2)
+    k = 3 / (share * short)  # soft minimum: corners round off over about a band's width
+    d = -np.log(np.exp(-k * dx) + np.exp(-k * dy)) / k
+    r = np.clip((d - warp) / (share * short), 0, 1)
+    return r * r * (3 - 2 * r)
 
 
 def _clean_coast(land: np.ndarray, nbrs: list[list[int]], passes: int = 2) -> np.ndarray:

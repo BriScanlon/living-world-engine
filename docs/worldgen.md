@@ -15,7 +15,7 @@ mode, with import and tiles) takes a few seconds.
 | # | stage | module | what it makes |
 |---|---|---|---|
 | 0 | scale and placement | `sample_world.generate` | a region of `region_km` (not a planet), centred at a latitude for the climate answer; `mapCoordinates` so 1 px is a known number of km |
-| 1 | mesh and terrain | `worldgen/mesh.py`, `worldgen/terrain.py` | Voronoi cells from a jittered lattice; land from shape bumps + fBm noise; mountain ranges on convergent tectonic-plate boundaries; sea level from the shape's sea share; clean coasts |
+| 1 | mesh and terrain | `worldgen/mesh.py`, `worldgen/terrain.py` | Voronoi cells from a jittered lattice; land from shape bumps + fBm noise; mountain ranges on convergent tectonic-plate boundaries; a ragged sea margin at the frame (no coast cut straight by the region's edge); sea level from the shape's sea share; clean coasts |
 | 3 | climate | `worldgen/climate.py` | temperature from latitude and height; rain carried by prevailing winds, with rain shadows |
 | 2 | water | `worldgen/water.py` | priority-flood: lakes or levelled basins; drainage and flux (fed by the rain); rivers with tributaries; harbour ratings |
 | 3 | biomes | `worldgen/climate.py` | a Whittaker-style table from temperature and rain to Azgaar's 13 biomes; low, wet ground becomes wetland |
@@ -42,7 +42,8 @@ wilds are capped at 60 (`MAX_WILDS`), villages are not graph nodes.
 
 **Land** (`sample_world.LAND_SHAPES`, `terrain.py`): per shape the number and radius of bumps and the sea share;
 `CLUSTERS` (how many separate landmasses *continents*, *islands* and *pangea* gather into); the noise mix per shape
-(island shapes lean on finer noise); `plates(k=...)` and its ~60% convergent boundaries for mountain chains.
+(island shapes lean on finer noise); `plates(k=...)` and its ~60% convergent boundaries for mountain chains;
+`frame_margin(share=0.06)` (the band of sea at the frame, measured through a noise warp of 5% of the short side).
 
 **Water** (`water.py: hydrology`): `lake_min_cells` (6) and `lake_min_depth` (3) for a basin to become a lake;
 `threshold` (default: land cells / 250) for a river; `min_len` (4 land cells).
