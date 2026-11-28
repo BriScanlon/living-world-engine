@@ -96,7 +96,9 @@ class AzgaarWorld:
         return self.uid("s", i, s.get("name", ""))
 
     # ------------------------------------------------------------------ layers
-    def layers(self) -> dict[str, dict[str, Any]]:
+    def layers(self, detail: bool = True) -> dict[str, dict[str, Any]]:
+        """The atlas layers. With ``detail`` (the default) the coast gets fractal detail down to ~100 m (#62), and
+        provinces, biomes and rivers are fitted to it; without, coasts are the cell outlines (simplified)."""
         cells = self.cells
         land = [c for c in cells if c.get("h", 0) >= 20]
         biomes = {bm["i"]: bm for bm in self.pack.get("biomes", []) if isinstance(bm, dict)}
@@ -118,30 +120,54 @@ class AzgaarWorld:
             if c.get("province"):
                 by_prov.setdefault(c["province"], []).append(c)
 
-        biome_feats = [{"type": "Feature", "geometry": mapping(g),
-                        "properties": {"biome": k, "name": biomes.get(k, {}).get("name", str(k)),
-                                       "color": biomes.get(k, {}).get("color", "#999999")}}
-                       for k, g in dissolve(by_biome).items()]
-        provs = {p["i"]: p for p in self.live(self.pack.get("provinces", []))}
-        prov_feats = []
-        for k, g in dissolve(by_prov).items():
-            p = provs.get(k, {})
-            prov_feats.append({"type": "Feature", "geometry": mapping(g),
-                               "properties": {"pid": self.province_uid(k), "name": p.get("fullName") or p.get("name", ""),
-                                              "azgaar_id": k}})
-        coast = unary_union([self.cell_polygon(c).buffer(0) for c in land]).simplify(0.02, preserve_topology=True)
-
-        def line(points: list[tuple[float, float]]) -> dict[str, Any]:
-            return mapping(LineString(points))
-
-        rivers = []
+        biome_geom = dissolve(by_biome)
+        prov_geom = dissolve(by_prov)
+        land_cells = unary_union([self.cell_polygon(c).buffer(0) for c in land])
+        burg_list = self.live(self.pack.get("burgs", []))
+        river_lines = []
         for r in self.pack.get("rivers", []):
             if not isinstance(r, dict) or len(r.get("cells") or []) < 2:
                 continue
             pts = [self.lonlat(*cells[c]["p"]) for c in r["cells"] if 0 <= c < len(cells)]
             if len(pts) >= 2:
-                rivers.append({"type": "Feature", "geometry": line(pts),
-                               "properties": {"name": r.get("name", ""), "id": r.get("i")}})
+                river_lines.append((r, LineString(pts)))
+        land_props: dict[str, Any] = {}
+        if detail and not land_cells.is_empty:
+            from atlas import cartography as carto
+            kmf = carto.KmFrame((land_cells.bounds[1] + land_cells.bounds[3]) / 2)
+            cell_km = math.sqrt(kmf.to_km(land_cells).area / max(1, len(land)))
+            info = self.raw.get("info", {})
+            coast = carto.detailed_coast(
+                land_cells, seed=carto.seed_of(info.get("seed"), info.get("mapName")), cell_km=cell_km,
+                relief_ll=[(*self.lonlat(*c["p"]), int(c.get("h", 0))) for c in land],
+                towns_ll=[self.lonlat(bg["x"], bg["y"]) for bg in burg_list],
+                ports_ll=[self.lonlat(bg["x"], bg["y"]) for bg in burg_list if bg.get("port")], land_cells=len(land))
+            prov_geom = carto.allocate(prov_geom, coast, land_cells)
+            biome_geom = carto.allocate(biome_geom, coast, land_cells)
+            river_lines = [(r, carto.river_to_coast(g, coast)) for r, g in river_lines]
+            land_props = {"detail": "fractal"}
+        else:
+            coast = land_cells.simplify(0.02, preserve_topology=True)
+
+        biome_feats = [{"type": "Feature", "geometry": mapping(g),
+                        "properties": {"biome": k, "name": biomes.get(k, {}).get("name", str(k)),
+                                       "color": biomes.get(k, {}).get("color", "#999999")}}
+                       for k, g in biome_geom.items() if not g.is_empty]
+        provs = {p["i"]: p for p in self.live(self.pack.get("provinces", []))}
+        prov_feats = []
+        for k, g in prov_geom.items():
+            if g.is_empty:
+                continue
+            p = provs.get(k, {})
+            prov_feats.append({"type": "Feature", "geometry": mapping(g),
+                               "properties": {"pid": self.province_uid(k), "name": p.get("fullName") or p.get("name", ""),
+                                              "azgaar_id": k}})
+
+        def line(points: list[tuple[float, float]]) -> dict[str, Any]:
+            return mapping(LineString(points))
+
+        rivers = [{"type": "Feature", "geometry": mapping(g), "properties": {"name": r.get("name", ""), "id": r.get("i")}}
+                  for r, g in river_lines if not g.is_empty]
         roads = []
         for r in self.pack.get("routes", []):
             pts = [self.lonlat(p[0], p[1]) for p in (r.get("points") or [])]
@@ -149,7 +175,7 @@ class AzgaarWorld:
                 roads.append({"type": "Feature", "geometry": line(pts),
                               "properties": {"group": r.get("group", "roads"), "id": r.get("i")}})
         burgs = []
-        for bg in self.live(self.pack.get("burgs", [])):
+        for bg in burg_list:
             lon, lat = self.lonlat(bg["x"], bg["y"])
             burgs.append({"type": "Feature", "geometry": mapping(Point(lon, lat)),
                           "properties": {"name": bg.get("name", ""), "capital": bool(bg.get("capital")),
@@ -163,7 +189,7 @@ class AzgaarWorld:
         fc = lambda feats: {"type": "FeatureCollection", "features": feats}  # noqa: E731
         return {
             "relief": fc(relief),
-            "land": fc([{"type": "Feature", "geometry": mapping(coast), "properties": {}}]),
+            "land": fc([{"type": "Feature", "geometry": mapping(coast), "properties": land_props}]),
             "biomes": fc(biome_feats), "provinces": fc(prov_feats),
             "rivers": fc(rivers), "roads": fc(roads), "burgs": fc(burgs),
         }
