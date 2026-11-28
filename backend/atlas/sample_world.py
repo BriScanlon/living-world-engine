@@ -175,6 +175,12 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
         h = wg_terrain.heightmap(centers, nbrs, width, height, nrng, n_blobs=n_blobs, blob_r=blob_r,
                                  sea_share=sea_share, shape=land,
                                  edge_falloff=0.15 if land in ("continents", "pangea", "old-world") else 0.45)
+        # water: depressions filled or turned into lakes, drainage, rivers with tributaries, harbours (#40)
+        from atlas.worldgen import water as wg_water
+        frame = lambda x, y: x <= 0.01 or y <= 0.01 or x >= width - 0.01 or y >= height - 0.01  # noqa: E731
+        edge = [any(frame(*vpos[v]) for v in cell_v[i]) for i in range(n)]
+        hydro = wg_water.hydrology(h, nbrs, edge)
+        h = hydro.h
     else:
         # ------------------------------------------------------------------ heightmap
         raw = []
@@ -239,7 +245,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
                     if land[b2] and feature[b2] == 0:
                         feature[b2] = fid
                         q.append(b2)
-    sizes = {f["i"]: sum(1 for x in feature if x == f["i"]) for f in features[2:]}
+    if mesh == "voronoi":
+        for lake in hydro.lakes:
+            fid = len(features)
+            features.append({"i": fid, "type": "lake", "land": False, "border": False, "cells": len(lake)})
+            for c in lake:
+                feature[c] = fid
+    sizes = {f["i"]: sum(1 for x in feature if x == f["i"]) for f in features[2:] if f["land"]}
 
     # ------------------------------------------------------------------ cultures (spatial)
     def farthest(cands: list[int], k: int, avoid: list[int] | None = None) -> list[int]:
@@ -427,7 +439,14 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
 
     # ------------------------------------------------------------------ rivers
     rivers = []
-    springs = sorted((i for i in land_cells if h[i] > 55), key=lambda c: rng.random())
+    if mesh == "voronoi":
+        for k, r in enumerate(hydro.rivers):
+            src = r["source"]
+            kind = "River" if r["discharge"] >= 3 * min(x["discharge"] for x in hydro.rivers) else "Stream"
+            rivers.append({"i": k + 1, "name": f"{_name(rng, (culture[src] or 1) - 1)} {kind}", "type": kind,
+                           "source": src, "mouth": r["mouth"], "cells": r["cells"], "discharge": r["discharge"],
+                           "parent": (r["parent"] + 1) if r["parent"] is not None else 0})
+    springs = [] if mesh == "voronoi" else sorted((i for i in land_cells if h[i] > 55), key=lambda c: rng.random())
     used: set[int] = set()
     max_rivers, max_len = (max(14, n // 350), max(60, n // 40)) if region else (14, 60)
     for src in springs:
@@ -444,10 +463,13 @@ def generate(seed: int = 1795, *, width: int = 1500, height: int = 700, radius: 
             rivers.append({"i": len(rivers) + 1, "name": _name(rng, (culture[src] or 1) - 1) + " River",
                            "type": "River", "source": src, "mouth": cells[-1], "cells": cells})
 
+    river_cell = {c: r["i"] for r in rivers for c in r["cells"][:-1]} if mesh == "voronoi" else {}
     pop = [round(rng.uniform(0.5, 6) * (1 if biome[i] in (4, 5, 6, 8) else 0.4), 2) if land[i] else 0 for i in range(n)]
     cells_out = [{"i": i, "v": cell_v[i], "c": nbrs[i], "p": list(centers[i]), "h": h[i], "f": feature[i],
                   "biome": biome[i], "state": state[i], "province": province[i], "culture": culture[i] if land[i] else 0,
-                  "religion": religion[i], "burg": burg_of[i], "pop": pop[i]} for i in range(n)]
+                  "religion": religion[i], "burg": burg_of[i], "pop": pop[i],
+                  **({"fl": round(hydro.flux[i], 1), "r": river_cell.get(i, 0), "harbor": hydro.harbor[i]}
+                     if mesh == "voronoi" else {})} for i in range(n)]
     return {
         "info": {"version": "sample-1", "description": "Living World Engine "
                  + (f"sample region ({region_km[0]:.0f} x {region_km[1]:.0f} km)" if region else "sample planet")

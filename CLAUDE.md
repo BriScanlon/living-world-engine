@@ -41,7 +41,8 @@ backend/
   ingestion/ markdown (Obsidian), documents (pypdf/docling), audio (whisper), extract.py (LLM -> graph), resolution,
             catalogue_link.py (mentions -> SRD/homebrew srd_ref, challenge, species)
   atlas/    azgaar.py (Full JSON importer -> GeoJSON + PMTiles), sample_world.py (generated planet or region; `mesh="voronoi"` uses `atlas/worldgen/`),
-            worldgen/ (native generation, epic #45: mesh.py Voronoi cells, terrain.py heightmap + plates),
+            worldgen/ (native generation, epic #45: mesh.py Voronoi cells, terrain.py heightmap + plates,
+            water.py priority-flood lakes, drainage, rivers + tributaries, harbours),
             service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
   wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step),
