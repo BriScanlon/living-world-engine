@@ -13,18 +13,31 @@ import math
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from shapely.geometry import Point, shape
+from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
 
+from atlas import cartography as carto
 from atlas.service import atlas_path, atlas_state
 from graph.store import GraphStore
 
 SIZE = (2560, 1440)  # 16:9 like the table; the VTT shows it whole ("contain")
 SS = 2  # draw at twice the size, then shrink: cheap anti-aliasing for polygons and lines
-OCEAN, LAND, BORDER = (43, 74, 99), (217, 201, 160), (91, 74, 53)
+SEA, SHALLOW, RIPPLE = (128, 164, 176), (176, 204, 204), (86, 122, 134)
+LAND, BORDER, COAST, LANE = (233, 218, 180), (104, 74, 96), (78, 58, 38), (236, 244, 246)
 RIVER, ROAD, INK = (79, 127, 166), (122, 90, 51), (40, 30, 20)
 FOG = (16, 20, 28)
 FOG_UNKNOWN, FOG_HEARD = 238, 120  # fog alpha over the unknown and the heard-of
+
+
+def _cell_px(proj: "Projection", relief: list[dict[str, Any]], land) -> float | None:
+    """The map's cell size in pixels, from how many relief points fall on the land drawn."""
+    if not relief or land.is_empty:
+        return None
+    import numpy as np
+    xy = proj.arr(np.array([f["geometry"]["coordinates"] for f in relief], dtype=float))
+    minx, miny, maxx, maxy = land.bounds
+    inside = int(((xy[:, 0] >= minx) & (xy[:, 0] <= maxx) & (xy[:, 1] >= miny) & (xy[:, 1] <= maxy)).sum())
+    return math.sqrt(land.area / inside) if inside else None
 
 
 class NothingKnown(ValueError):
@@ -38,11 +51,8 @@ def _features(slug: str, layer: str) -> list[dict[str, Any]]:
     return json.loads(p.read_text(encoding="utf-8")).get("features", [])
 
 
-def _font(px: int) -> ImageFont.ImageFont:
-    try:
-        return ImageFont.load_default(size=px)
-    except TypeError:  # Pillow without FreeType: fixed-size bitmap font
-        return ImageFont.load_default()
+def _font(px: int, bold: bool = False) -> ImageFont.ImageFont:
+    return carto.serif(px, bold)
 
 
 def _hex(c: str | None, default=(154, 163, 173)) -> tuple[int, int, int]:
@@ -71,6 +81,11 @@ class Projection:
     def __call__(self, lon: float, lat: float) -> tuple[float, float]:
         return (lon * self.k - self.cx) * self.s + self.w / 2, self.h / 2 - (lat - self.cy) * self.s
 
+    def arr(self, a):
+        """Many (lon, lat) at once: an (N, 2) array to pixels."""
+        import numpy as np
+        return np.column_stack([(a[:, 0] * self.k - self.cx) * self.s + self.w / 2, self.h / 2 - (a[:, 1] - self.cy) * self.s])
+
     def km_per_px(self) -> float:
         return 111.32 / self.s
 
@@ -89,31 +104,30 @@ def _fill(draw: ImageDraw.ImageDraw, proj: Projection, geom, fill, hole=None, ou
                 draw.polygon([proj(*c[:2]) for c in h], fill=hole)
 
 
-def _line(draw: ImageDraw.ImageDraw, proj: Projection, geom, fill, width: int, dash: int = 0) -> None:
-    lines = [geom] if geom.geom_type == "LineString" else list(getattr(geom, "geoms", []))
-    for ln in lines:
-        pts = [proj(*c[:2]) for c in ln.coords]
-        if not dash:
-            draw.line(pts, fill=fill, width=width, joint="curve")
-            continue
-        on, left = True, dash
-        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-            seg = math.hypot(x1 - x0, y1 - y0)
-            t = 0.0
-            while t < seg:
-                step = min(left, seg - t)
-                if on:
-                    a, b = t / seg, (t + step) / seg
-                    draw.line([(x0 + (x1 - x0) * a, y0 + (y1 - y0) * a), (x0 + (x1 - x0) * b, y0 + (y1 - y0) * b)],
-                              fill=fill, width=width)
-                t += step
-                left -= step
-                if left <= 0:
-                    on, left = not on, dash
+def _dash(draw: ImageDraw.ImageDraw, pts, fill, width: int, dash: int, gap: int | None = None) -> None:
+    """A dashed line through pixel points, the dashes running on across corners."""
+    pts = [tuple(p) for p in pts]
+    gap = dash if gap is None else gap
+    on, left = True, dash
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        seg = math.hypot(x1 - x0, y1 - y0)
+        t = 0.0
+        while t < seg:
+            step = min(left, seg - t)
+            if on:
+                a, b = t / seg, (t + step) / seg
+                draw.line([(x0 + (x1 - x0) * a, y0 + (y1 - y0) * a), (x0 + (x1 - x0) * b, y0 + (y1 - y0) * b)],
+                          fill=fill, width=width)
+            t += step
+            left -= step
+            if left <= 0:
+                on = not on
+                left = dash if on else gap
 
 
-def _label(draw: ImageDraw.ImageDraw, xy, text: str, px: int, fill=INK, halo=(236, 226, 196), anchor="ms") -> None:
-    draw.text(xy, text, font=_font(px), fill=fill, anchor=anchor, stroke_width=max(2, px // 7), stroke_fill=halo)
+def _label(draw: ImageDraw.ImageDraw, xy, text: str, px: int, fill=INK, halo=(236, 226, 196), anchor="ms",
+           bold: bool = False) -> None:
+    draw.text(xy, text, font=_font(px, bold), fill=fill, anchor=anchor, stroke_width=max(2, px // 8), stroke_fill=halo)
 
 
 RANK = {"capital": 0, "city": 1, "town": 2, "village": 3, "district": 4}
@@ -160,29 +174,61 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     W, H = size[0] * SS, size[1] * SS
     proj = Projection(bounds, (W, H))
 
-    # ---- the world as drawn by a cartographer
-    img = Image.new("RGBA", (W, H), OCEAN + (255,))
-    draw = ImageDraw.Draw(img)
-    for f in _features(slug, "land"):
-        _fill(draw, proj, shape(f["geometry"]), LAND + (255,), hole=OCEAN + (255,))
-    tint = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    tdraw = ImageDraw.Draw(tint)
+    # ---- the world as drawn by a cartographer (atlas/cartography.py)
+    seed = carto.seed_of(slug)
+    view = box(-0.1 * W, -0.1 * H, 1.1 * W, 1.1 * H)
+    wob = carto.Wobble(seed, amp=1.6 * SS, scale=40 * SS)
+
+    def px(geom):
+        return carto.to_px(geom, proj.arr).intersection(view)
+
+    raw_land = unary_union([px(shape(f["geometry"]).buffer(0)) for f in _features(slug, "land")])
+    relief = [f for f in _features(slug, "relief")]
+    cell = _cell_px(proj, relief, raw_land) or 30.0 * SS
+    land = carto.smooth(raw_land, wob, cell)
+    img = Image.new("RGBA", (W, H), SEA + (255,))
+    img.alpha_composite(carto.shallows((W, H), land, 22 * SS, SHALLOW + (170,)))
+    draw = ImageDraw.Draw(img, "RGBA")
+    carto.ripples(draw, land, [9 * SS, 18 * SS, 29 * SS], RIPPLE + (150,), max(1, SS))
+    carto.fill(draw, land, LAND + (255,), hole=SEA + (255,))
+    mask = Image.new("L", (W, H), 0)
+    carto.fill(ImageDraw.Draw(mask), land, 255, hole=0)
+    paint = []
     for f in _features(slug, "biomes"):  # biomes, muted into the parchment
-        _fill(tdraw, proj, shape(f["geometry"]), _hex(f["properties"].get("color")) + (70,))
-    for uid, p in known.items():  # who holds the provinces the party has seen
-        if p["known"] == "visited" and p.get("controller") and uid in provinces:
-            _fill(tdraw, proj, provinces[uid], _hex(p.get("color")) + (60,))
-    img.alpha_composite(tint)
+        c = _hex(f["properties"].get("color"))
+        paint.append((px(shape(f["geometry"]).buffer(0)), tuple(int(0.65 * c[i] + 0.35 * LAND[i]) for i in range(3)) + (110,)))
+    prov_px = {uid: px(g.buffer(0)) for uid, g in provinces.items()}
+    tint = carto.wash((W, H), paint, cell * 0.45)
+    realms = [(prov_px[uid], _hex(p.get("color")) + (70,)) for uid, p in known.items()
+              if p["known"] == "visited" and p.get("controller") and uid in prov_px]
+    if realms:  # who holds the provinces the party has seen: a soft wash of the realm's colour
+        tint.alpha_composite(carto.wash((W, H), realms, cell * 0.8))
+    base = img.copy()
+    base.alpha_composite(tint)
+    img = Image.composite(base, img, mask)  # colour stays inside the smoothed coast
+    draw = ImageDraw.Draw(img, "RGBA")
+    for pts in carto.borders(list(prov_px.values()), wob, cell, clip=land.buffer(-1.5 * SS)):
+        _dash(draw, pts, BORDER + (150,), max(1, SS), int(1.5 * SS), gap=3 * SS)  # dotted, unlike roads
     for f in _features(slug, "rivers"):
-        _line(draw, proj, shape(f["geometry"]), RIVER + (255,), 3 * SS)
+        g = px(shape(f["geometry"]))
+        for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
+            if ln.geom_type != "LineString" or ln.length < 4 * SS:
+                continue
+            pts = carto.smooth_line(ln.coords, carto.Wobble(seed + 1, 1.5 * SS, 30 * SS), 4 * SS)
+            carto.taper(draw, pts, 0.8 * SS, min(5.0, 1.6 + ln.length / (350 * SS)) * SS, RIVER + (255,))
     for f in _features(slug, "roads"):
         group = (f.get("properties") or {}).get("group")
-        if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
-            _line(draw, proj, shape(f["geometry"]), (205, 228, 245, 200), 2 * SS, dash=5 * SS)
-        else:
-            _line(draw, proj, shape(f["geometry"]), ROAD + (220,), (3 if group == "highways" else 2) * SS, dash=9 * SS)
-    for g in provinces.values():
-        _fill(draw, proj, g, None, outline=BORDER + (150,), width=SS)
+        g = px(shape(f["geometry"]))
+        for ln in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
+            if ln.geom_type != "LineString":
+                continue
+            pts = carto.smooth_line(ln.coords, carto.Wobble(seed + 2, 0, 1), 6 * SS)
+            if group == "searoutes":  # sea lanes: sailed, drawn in pale sea blue
+                _dash(draw, pts, LANE + (210,), 2 * SS, 5 * SS)
+            else:
+                _dash(draw, pts, ROAD + (225,), (3 if group == "highways" else 2) * SS, 9 * SS)
+    carto.outline(draw, land, COAST + (255,), 2 * SS)  # the inked coast, lakes too
+    img = carto.parchment(img, seed)
 
     # ---- fog of war: soft-edged, over land and sea alike
     mask = Image.new("L", (W, H), FOG_UNKNOWN)
@@ -216,7 +262,7 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
             continue
         x, y = proj(*g.representative_point().coords[0])
         if p["known"] == "visited":
-            _label(draw, (x, y), p["name"].upper(), 26 * SS, fill=(70, 52, 32))
+            _label(draw, (x, y), " ".join(p["name"].upper()), 24 * SS, fill=(92, 66, 40), bold=True)
         else:
             _label(draw, (x, y), p["name"], 22 * SS, fill=(200, 190, 170), halo=(30, 34, 44))
     for group in _clusters([f for f in places if f["properties"].get("kind") != "continent"], proj, 40 * SS):
@@ -250,7 +296,7 @@ def render(store: GraphStore, branch: str = "main", day: int | None = None,
     bx, by = 40 * SS, H - 150 * SS
     draw.rounded_rectangle([bx, by, bx + tw + 60 * SS, H - 40 * SS], radius=14 * SS, fill=(236, 226, 196, 235),
                            outline=(120, 90, 50), width=3 * SS)
-    draw.text((bx + 30 * SS, by + 18 * SS), title, font=_font(40 * SS), fill=INK)
+    draw.text((bx + 30 * SS, by + 18 * SS), title, font=_font(40 * SS, True), fill=INK)
     draw.text((bx + 30 * SS, by + 70 * SS), sub, font=_font(22 * SS), fill=(90, 70, 45))
     cx, cy, cr = W - 110 * SS, 120 * SS, 50 * SS
     draw.polygon([(cx, cy - cr), (cx + cr * 0.32, cy), (cx, cy + cr * 0.25), (cx - cr * 0.32, cy)],

@@ -329,6 +329,11 @@ only what they know, on that branch and day.
   "you are here" ring) and shows it on the players' table, fitted to the screen with the battle grid hidden. While
   it is up, every *Party knowledge* mark redraws it; older party maps of the same world are removed from the VTT
   library. *preview* opens the image.
+  It is drawn in a cartographer's style (`backend/atlas/cartography.py`, epic #58): coasts with the cell zigzag
+  smoothed out and inked, ripple lines and a pale band of shallows along them, biomes and the holding realm laid on
+  as soft painted washes, dotted province borders, rivers that widen towards the sea, serif lettering, and an aged
+  parchment finish. The importer keeps a `relief.geojson` layer (height and biome per land cell) for terrain symbols;
+  a world imported before it was added draws without it until re-imported.
 
 ### 9. Travel times (`backend/atlas/travel.py`)
 

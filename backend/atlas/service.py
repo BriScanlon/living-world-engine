@@ -68,7 +68,7 @@ def import_world(store: GraphStore, path: str | Path, *, branch: str = "main", s
     if centre is None:
         bb = world.bbox()
         centre = ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2)
-    docs.append(world.atlas_doc(list(layers), has_tiles, centre))
+    docs.append(world.atlas_doc([n for n in layers if n in LAYERS], has_tiles, centre))  # relief: renderers only
     store.upsert(docs, branch, f"[atlas] import {world.name} from Azgaar: "
                                f"{sum(d['@type'] == 'Faction' for d in docs)} realms, "
                                f"{sum(d['@type'] == 'Province' for d in docs)} provinces, "
