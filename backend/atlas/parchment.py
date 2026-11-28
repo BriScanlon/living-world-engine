@@ -7,12 +7,22 @@ fixed: the cell size is set per zoom, nothing is wobbled or thinned, and each ti
 keeps only the symbols whose foot falls in its own square plus a band both neighbours draw alike. Lettering stays
 with the atlas (MapLibre places it, with its own collisions). Tiles are cached under the atlas folder; a re-import
 clears them.
+
+Tiles are drawn the first time they are asked for (about a second each), and also ahead of time:
+:func:`warm_in_background` draws every tile over land up to ``parchment_warm_zoom`` in one background thread per look (the
+Parchment look after an import and at start-up; either look when a world's tiles in it are first asked for), so the regional zooms are ready before anyone
+zooms in. It steps aside while a viewer's own tiles are drawing.
 """
 from __future__ import annotations
 
 import io
 import json
+import logging
 import math
+import os
+import shutil
+import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -24,6 +34,8 @@ from shapely.geometry import box, shape
 from atlas import cartography as carto
 from atlas import emblems
 from atlas.service import atlas_path
+
+log = logging.getLogger(__name__)
 
 TILE = 512  # pixels served per tile (shown as 256 css px: crisp on high-density screens)
 RENDER = 2  # drawn at twice that, then scaled down: anti-aliasing
@@ -95,13 +107,41 @@ def cache_dir(slug: str) -> Path:
     return atlas_path(slug) / "parchment"
 
 
-def render_tile(slug: str, z: int, x: int, y: int, style: str = "colour") -> bytes:
-    """One parchment tile as WebP (transparent outside the world's region), cached on disk."""
-    from atlas.party_map import STYLES, draw_world
+_asked = 0  # viewers' tiles being drawn right now: the warmer waits for them
+_asked_lock = threading.Lock()
+
+
+def tile_file(slug: str, z: int, x: int, y: int, style: str) -> Path:
+    return cache_dir(slug) / VERSION / style / str(z) / str(x) / f"{y}.webp"
+
+
+def render_tile(slug: str, z: int, x: int, y: int, style: str = "colour", *, background: bool = False) -> bytes:
+    """One parchment tile as WebP (transparent outside the world's region), cached on disk. ``background`` is the
+    warmer drawing ahead; otherwise a viewer is waiting, and the warmer pauses until this one is done."""
+    from atlas.party_map import STYLES
     style = style if style in STYLES else "colour"
-    out = cache_dir(slug) / VERSION / style / str(z) / str(x) / f"{y}.webp"
+    out = tile_file(slug, z, x, y, style)
     if out.exists():
         return out.read_bytes()
+    global _asked
+    if not background:
+        with _asked_lock:
+            _asked += 1
+    try:
+        data = _draw(slug, z, x, y, style)
+    finally:
+        if not background:
+            with _asked_lock:
+                _asked -= 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    part = out.with_name(f"{out.name}.{os.getpid()}.{threading.get_ident()}.part")
+    part.write_bytes(data)
+    os.replace(part, out)  # whole files only: the warmer and a viewer may draw the same tile at once
+    return data
+
+
+def _draw(slug: str, z: int, x: int, y: int, style: str) -> bytes:
+    from atlas.party_map import STYLES, draw_world
     land_file = atlas_path(slug) / "land.geojson"
     reg = _region(slug, land_file.stat().st_mtime if land_file.exists() else 0.0)
     T = TILE * RENDER
@@ -148,8 +188,6 @@ def render_tile(slug: str, z: int, x: int, y: int, style: str = "colour") -> byt
         buf = io.BytesIO()
         tile.save(buf, "WEBP", quality=86, method=4)
         data = buf.getvalue()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(data)
     return data
 
 
@@ -158,3 +196,121 @@ def _blank() -> bytes:
     buf = io.BytesIO()
     Image.new("RGBA", (TILE, TILE), (0, 0, 0, 0)).save(buf, "WEBP", lossless=True)
     return buf.getvalue()
+
+
+# --- drawing ahead -------------------------------------------------------------------------------------------------
+
+_warming: dict[str, dict[str, Any]] = {}  # atlas folder + version + look -> {"running", "done", "total", "finished"}
+_warm_lock = threading.Lock()
+
+
+@lru_cache(maxsize=16)
+def _land(slug: str, stamp: float):
+    """The world's land, simplified for quick tests of which tiles touch it: (prepared geometry, bounds)."""
+    from shapely.ops import unary_union
+    from shapely.prepared import prep
+    g = unary_union([shape(f["geometry"]).buffer(0) for f in _layer(slug, "land")]).simplify(0.05)
+    return (prep(g), g.bounds) if not g.is_empty else (None, None)
+
+
+def tiles_over_land(slug: str, z: int) -> list[tuple[int, int]]:
+    """The tiles at zoom ``z`` with land on them (or within a quarter tile), nearest the land's middle first."""
+    land_file = atlas_path(slug) / "land.geojson"
+    if not land_file.exists() or z < MIN_ZOOM or z > MAX_ZOOM:
+        return []
+    land, bounds = _land(slug, land_file.stat().st_mtime)
+    if land is None:
+        return []
+    probe = MercatorTile(z, 0, 0, 1, 0)
+    (ax, ay), (bx, by) = probe(bounds[0], bounds[3]), probe(bounds[2], bounds[1])
+    out = []
+    for tx in range(max(0, int(ax) - 1), min(2 ** z, int(bx) + 2)):
+        for ty in range(max(0, int(ay) - 1), min(2 ** z, int(by) + 2)):
+            w, n = probe.inverse(tx - 0.25, ty - 0.25)
+            e, s = probe.inverse(tx + 1.25, ty + 1.25)
+            if land.intersects(box(w, s, e, n)):
+                out.append((tx, ty))
+    mx, my = (ax + bx) / 2, (ay + by) / 2
+    return sorted(out, key=lambda c: (c[0] + 0.5 - mx) ** 2 + (c[1] + 0.5 - my) ** 2)
+
+
+def warm_plan(slug: str, max_zoom: int, cap: int) -> list[tuple[int, int, int]]:
+    """The tiles (z, x, y) to draw ahead, in order: zoom by zoom (the far views first), at most ``cap``, whole
+    zooms only."""
+    plan: list[tuple[int, int, int]] = []
+    for z in range(MIN_ZOOM, min(max_zoom, MAX_ZOOM) + 1):
+        tiles = tiles_over_land(slug, z)
+        if len(plan) + len(tiles) > cap:
+            break  # half a zoom drawn ahead helps nobody: the view would still wait
+        plan += [(z, x, y) for x, y in tiles]
+    return plan
+
+
+def warm(slug: str, max_zoom: int, cap: int, style: str = "colour", *, status: dict[str, Any] | None = None) -> int:
+    """Draw ahead, in one look, every tile of :func:`warm_plan` not yet cached; returns how many were drawn."""
+    status = status if status is not None else {}
+    for d in cache_dir(slug).glob("*"):
+        if d.is_dir() and d.name != VERSION:
+            shutil.rmtree(d, ignore_errors=True)  # older drawings: nobody asks for them any more
+    plan = warm_plan(slug, max_zoom, cap)
+    status.update(total=len(plan), done=0)
+    drawn = 0
+    for z, x, y in plan:
+        if not tile_file(slug, z, x, y, style).exists():
+            while _asked:
+                time.sleep(0.05)
+            if not (atlas_path(slug) / "land.geojson").exists():
+                break  # the world went away
+            render_tile(slug, z, x, y, style, background=True)
+            drawn += 1
+        status["done"] += 1
+    return drawn
+
+
+def _key(slug: str, style: str) -> str:
+    return f"{atlas_path(slug)}|{VERSION}|{style}"
+
+
+def warm_in_background(slug: str, style: str = "colour") -> bool:
+    """Start drawing ``slug``'s tiles ahead in one look, in a background thread, unless that is turned off
+    (``parchment_warm_zoom`` below 3), already running, or done for this drawing. Returns whether it started.
+    Imports and start-up draw ``colour`` (the Parchment look); ink is drawn ahead once an ink tile is asked for."""
+    from atlas.party_map import STYLES
+    from config import get_settings
+    s = get_settings()
+    if style not in STYLES or s.parchment_warm_zoom < MIN_ZOOM or not (atlas_path(slug) / "land.geojson").exists():
+        return False
+    with _warm_lock:
+        st = _warming.get(_key(slug, style))
+        if st and (st["running"] or st["finished"]):
+            return False
+        st = _warming[_key(slug, style)] = {"running": True, "finished": False, "done": 0, "total": 0}
+
+    def run() -> None:
+        t0 = time.monotonic()
+        try:
+            n = warm(slug, s.parchment_warm_zoom, s.parchment_warm_tiles, style, status=st)
+            log.info("Parchment (%s) tiles for %s drawn ahead: %s new, %s in all, %.0f s", style, slug, n,
+                     st["total"], time.monotonic() - t0)
+            st["finished"] = True
+        except Exception:  # noqa: BLE001 - tiles are still drawn when asked for
+            log.exception("Drawing parchment (%s) tiles ahead for %s failed", style, slug)
+        finally:
+            st["running"] = False
+
+    threading.Thread(target=run, name=f"parchment-warm-{slug}-{style}", daemon=True).start()
+    return True
+
+
+def forget_warm(slug: str) -> None:
+    """A re-import: the next :func:`warm_in_background` starts over."""
+    with _warm_lock:
+        for k in [k for k in _warming if k.startswith(f"{atlas_path(slug)}|")]:
+            _warming.pop(k)
+
+
+def warm_status(slug: str) -> dict[str, dict[str, Any]]:
+    """How far drawing ahead has got, per look started: ``{look: {running, done, total}}``."""
+    pre = f"{atlas_path(slug)}|{VERSION}|"
+    return {k[len(pre):]: {f: st[f] for f in ("running", "done", "total")}
+            for k, st in list(_warming.items()) if k.startswith(pre)}

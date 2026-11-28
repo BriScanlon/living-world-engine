@@ -380,11 +380,12 @@ def atlas_parchment_tile(slug: str, z: int, x: int, y: int, style: str = "colour
     """A parchment raster tile (Web Mercator): the party map's drawn look for the DM atlas (#57)."""
     from fastapi.responses import Response
 
-    from atlas.parchment import render_tile
+    from atlas.parchment import render_tile, warm_in_background
     if not slug.replace("-", "").isalnum() or not (0 <= z <= 22 and 0 <= x < 2 ** z and 0 <= y < 2 ** z):
         raise HTTPException(404, "No such tile")
     if not (atlas_path(slug) / "land.geojson").exists():
         raise HTTPException(404, "Not built")
+    warm_in_background(slug, style)  # once per world, drawing and look: the rest of the regional zooms, ahead
     return Response(render_tile(slug, z, x, y, style), media_type="image/webp",
                     headers={"Cache-Control": "public, max-age=3600"})
 
