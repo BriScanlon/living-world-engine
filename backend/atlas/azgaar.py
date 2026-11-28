@@ -154,8 +154,15 @@ class AzgaarWorld:
             burgs.append({"type": "Feature", "geometry": mapping(Point(lon, lat)),
                           "properties": {"name": bg.get("name", ""), "capital": bool(bg.get("capital")),
                                          "port": bool(bg.get("port")), "uid": self.uid("b", bg["i"], bg.get("name", ""))}})
+        # relief: one point per land cell (height, biome), for maps drawn with terrain symbols (#54)
+        relief = []
+        for c in land:
+            lon, lat = self.lonlat(*c["p"])
+            relief.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 4), round(lat, 4)]},
+                           "properties": {"h": int(c.get("h", 0)), "b": int(c.get("biome", 0))}})
         fc = lambda feats: {"type": "FeatureCollection", "features": feats}  # noqa: E731
         return {
+            "relief": fc(relief),
             "land": fc([{"type": "Feature", "geometry": mapping(coast), "properties": {}}]),
             "biomes": fc(biome_feats), "provinces": fc(prov_feats),
             "rivers": fc(rivers), "roads": fc(roads), "burgs": fc(burgs),

@@ -45,7 +45,7 @@ backend/
             water.py priority-flood lakes, drainage, rivers + tributaries, harbours, climate.py temperature,
             wind-borne rain with rain shadows, Whittaker biomes, polities.py habitability, cultures, realms,
             towns + ports, balanced provinces, routes.py roads/trails/highways and sea lanes),
-            service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image),
+            service.py (atlas_state, place_detail), party.py (party knowledge/fog), party_map.py (overland image), cartography.py (its drawn look),
             travel.py (routes, roads, sea, paces), local.py (zoom-in maps of any spot)
   wizard/   spec.py, builder.py (World Builder's Guidebook-style new-world wizard, one commit per step),
             prose.py (real model rewrites template descriptions in a 6th `[setup] prose` commit; public facts only)
@@ -100,7 +100,11 @@ docs/       azgaar-field-guide.md (how to make/export an Azgaar world), worldgen
   (the design doc's rename to `catalogue_ref` was not done).
 - **Overland party map** (`atlas/party_map.py`) is rendered server-side with Pillow/shapely, uploaded to the VTT
   tagged `lwe-overland:<db>` (shown "contain", no battle grid), replaces older ones, and redraws itself after a
-  party-knowledge mark while it is on the table.
+  party-knowledge mark while it is on the table. Its look comes from `atlas/cartography.py` (pixel-space helpers:
+  `smooth` = morphological close/open at the cell size + Chaikin + a *position-seeded* wobble, so shared edges bend
+  alike; washes, ripples, tapered rivers, parchment; serif = DejaVu Serif from `fonts-dejavu-core`). Everything is
+  seeded from the atlas slug, so redraws are identical. `relief.geojson` (one point per land cell: `h`, `b`) is
+  written on import but kept out of `LAYERS`/tiles and the WorldAtlas layer list.
 
 ## The forecast pipeline (simulation/engine.py)
 
